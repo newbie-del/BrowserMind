@@ -23,6 +23,12 @@ export type RunStep = {
 export const runWorkflowTask = task({
   id: "run-workflow",
 
+  // A browser run must not silently retry: each retry launches a fresh browser
+  // and re-does the same work (that is the "another browser opens" symptom).
+  retry: { maxAttempts: 1 },
+  // Backstop so a stuck run is killed rather than hanging for the config's hour.
+  maxDuration: 720,
+
   run: async ({
     workflowId,
     orgId,

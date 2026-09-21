@@ -94,12 +94,17 @@ async def run_agent(payload: dict[str, str | None]) -> None:
             "BROWSER_USE_LLM_PROVIDER must be google, openai, or browser-use"
         )
 
+    # Vision (sending screenshots to the LLM each step) is the biggest per-step
+    # cost. It helps on visually complex pages but slows text/research tasks a
+    # lot, so make it a switch — set BROWSER_USE_USE_VISION=false for speed.
+    use_vision = os.getenv("BROWSER_USE_USE_VISION", "true").lower() == "true"
+
     agent = Agent(
         task=task,
         browser=browser,
         llm=llm,
         extend_system_message=RESEARCH_POLICY,
-        use_vision=True,
+        use_vision=use_vision,
         max_actions_per_step=3,
         max_failures=int(os.getenv("BROWSER_USE_MAX_FAILURES", "1")),
         directly_open_url=True,
@@ -113,7 +118,9 @@ async def run_agent(payload: dict[str, str | None]) -> None:
             )
 
         history = await agent.run(
-            max_steps=int(os.getenv("BROWSER_USE_MAX_STEPS", "80")),
+            # 40 steps is plenty for a demo task and bounds the worst case;
+            # raise BROWSER_USE_MAX_STEPS for genuinely long jobs.
+            max_steps=int(os.getenv("BROWSER_USE_MAX_STEPS", "40")),
             on_step_end=on_step_end,
         )
     except Exception:

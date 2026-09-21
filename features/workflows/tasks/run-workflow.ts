@@ -106,37 +106,59 @@ export const runWorkflowTask = task({
         task,
       })
 
+      // Email only when the workflow actually contains a Send Email node, so
+      // the canvas and the behaviour agree: no email node means no email sent.
+      const emailNode = nodes.find((node) => node.data.type === "send-email")
+      const emailStep = steps.find((step) => step.type === "send-email")
+
       let emailError: string | undefined
-      try {
-        await sendEmail({
-          to: process.env.WORKFLOW_RESULTS_EMAIL ?? "mreverything1823@gmail.com",
-          subject: `${workflow.name} results`,
-          body: [
-            `<h2>${escapeHtml(workflow.name)} results</h2>`,
-            `<p>${escapeHtml(result.message ?? "The browser task completed.")}</p>`,
-            `<p><strong>Actions:</strong> ${escapeHtml(result.actions.join(", "))}</p>`,
-            `<p><strong>Source domains:</strong> ${escapeHtml(result.sourceDomains?.join(", ") || "Not available")}</p>`,
-            `<p><strong>Sources visited:</strong> ${escapeHtml(result.urls.join("\n"))}</p>`,
-          ]
-            .join("")
-            .replace(/\n/g, "<br />"),
-        })
-      } catch (error) {
-        emailError = error instanceof Error ? error.message : String(error)
-        logger.warn("Workflow completed but results email failed", {
-          recipient:
-            process.env.WORKFLOW_RESULTS_EMAIL ??
-            "mreverything1823@gmail.com",
-          error: emailError,
-        })
+      let emailId: string | undefined
+      let emailTo: string | undefined
+
+      if (emailNode) {
+        emailTo =
+          emailNode.data.values.to?.trim() ||
+          process.env.WORKFLOW_RESULTS_EMAIL ||
+          "mreverything1823@gmail.com"
+        const subject =
+          emailNode.data.values.subject?.trim() || `${workflow.name} results`
+
+        try {
+          const sent = await sendEmail({
+            to: emailTo,
+            subject,
+            body: [
+              `<h2>${escapeHtml(workflow.name)} results</h2>`,
+              `<p>${escapeHtml(result.message ?? "The browser task completed.")}</p>`,
+              `<p><strong>Actions:</strong> ${escapeHtml(result.actions.join(", "))}</p>`,
+              `<p><strong>Source domains:</strong> ${escapeHtml(result.sourceDomains?.join(", ") || "Not available")}</p>`,
+              `<p><strong>Sources visited:</strong> ${escapeHtml(result.urls.join("\n"))}</p>`,
+            ]
+              .join("")
+              .replace(/\n/g, "<br />"),
+          })
+          emailId = sent.id
+        } catch (error) {
+          emailError = error instanceof Error ? error.message : String(error)
+          logger.warn("Workflow completed but results email failed", {
+            recipient: emailTo,
+            error: emailError,
+          })
+        }
       }
 
       localAgentStep.status = result.success === false ? "failed" : "done"
-      localAgentStep.output = emailError ? { ...result, emailError } : result
+      localAgentStep.output = result
       localAgentStep.durationMs = undefined
 
       for (const step of steps) {
-        if (step.status === "pending") {
+        if (step === emailStep) {
+          step.status = emailError ? "failed" : "done"
+          step.error = emailError
+          step.output = emailError
+            ? { error: emailError }
+            : { id: emailId, to: emailTo }
+        } else if (step.status === "pending") {
           step.status = "done"
           step.output = {
             skipped: "Completed by the Browser-Use Agent workflow runner.",

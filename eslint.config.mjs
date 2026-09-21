@@ -17,6 +17,11 @@ const eslintConfig = defineConfig([
     ".cursor/**",
     ".trigger/**",
     "pxpipe-export-*/**",
+    // Reference checkouts and the Python engine live in the repo but are not
+    // part of the app's lint/typecheck surface.
+    "browser-use/**",
+    "browser-os/**",
+    "reference/**",
   ]),
 ]);
 

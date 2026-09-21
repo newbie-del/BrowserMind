@@ -34,10 +34,8 @@ out/
 browser-os/
 reference/
 
-# ---- Stray / debug artifacts ----
+# ---- Debug artifacts ----
 error/
-src/trigger/
-/trigger.config.ts
 
 # ---- Misc ----
 .DS_Store

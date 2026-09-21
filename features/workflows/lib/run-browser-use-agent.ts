@@ -136,9 +136,11 @@ export async function runBrowserUseAgent({
     )
   }
 
+  // moduleDirectory is features/workflows/lib; three levels up is the repo root
+  // (browsermind), where the browser-use engine now lives as a subfolder.
   const sourcePath = path.resolve(
     process.env.BROWSER_USE_SOURCE_PATH ??
-      path.join(moduleDirectory, "..", "..", "..", "..", "browser-use")
+      path.join(moduleDirectory, "..", "..", "..", "browser-use")
   )
   const pythonPath =
     process.env.BROWSER_USE_PYTHON ?? defaultPythonPath(sourcePath)

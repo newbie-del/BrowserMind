@@ -32,5 +32,11 @@
     ".next/dev/types/**/*.ts",
     "trigger.config.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "browser-use",
+    "browser-os",
+    "reference",
+    "pxpipe-export-B3yRYm"
+  ]
 }

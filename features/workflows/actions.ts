@@ -10,7 +10,7 @@ import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow";
 
 import { liveblocks } from "@/lib/liveblocks"
 import { createWorkflow, deleteWorkflow, saveWorkflowGraph } from "@/features/workflows/data"
-import { buildDraftGraphFromGoal } from "@/features/workflows/lib/goal-planner"
+import { planWorkflowFromGoal } from "@/features/workflows/lib/plan-workflow"
 import { WorkflowGraph } from "@/lib/db/schema"
 
 const MAX_GOAL_LENGTH = 2_000
@@ -65,10 +65,12 @@ export async function createWorkflowFromGoalAction(goal: string) {
     orgId,
   })
 
+  const graph = await planWorkflowFromGoal(trimmedGoal)
+
   const workflow = await createWorkflow(orgId, workflowNameFromGoal(trimmedGoal), {
     goalText: trimmedGoal,
     generationStatus: "generated",
-    graph: buildDraftGraphFromGoal(trimmedGoal),
+    graph,
   })
 
   Sentry.logger.info("Goal workflow created", {

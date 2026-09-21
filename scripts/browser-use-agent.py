@@ -12,8 +12,10 @@ from browser_use import ChatBrowserUse
 
 
 SCRIPT_PATH = Path(__file__).resolve()
-load_dotenv(SCRIPT_PATH.parents[1] / ".env")
-load_dotenv(SCRIPT_PATH.parents[2] / ".env", override=True)
+# override=True so the repo-root .env is the source of truth even when the
+# Trigger worker passes stale inherited env vars — otherwise editing .env has no
+# effect until the worker is restarted.
+load_dotenv(SCRIPT_PATH.parents[1] / ".env", override=True)
 
 RESEARCH_POLICY = """
 For research and listing tasks, do not stop after opening one website or applying
@@ -137,6 +139,34 @@ def build_llm_candidates() -> list[tuple[str, "callable"]]:
             "OPENAI_API_KEY, or BROWSER_USE_API_KEY."
         )
     return candidates
+
+
+def is_provider_error(text: str) -> bool:
+    """Does this error text look like an LLM provider/transport failure (rate
+    limit, token/TPM cap, overload, quota) rather than a genuine task failure?
+    Used to decide whether to fall back to the next provider in the chain."""
+    lowered = text.lower()
+    return any(
+        sign in lowered
+        for sign in (
+            "rate_limit",
+            "rate limit",
+            "429",
+            " 413",
+            "413 ",
+            "503",
+            "500",
+            "tokens per minute",
+            "too large",
+            "resource_exhausted",
+            "unavailable",
+            "quota",
+            "overloaded",
+            "context length",
+            "context_length",
+            "maximum context",
+        )
+    )
 
 
 def source_domains(urls: list[str]) -> list[str]:
@@ -276,14 +306,15 @@ async def run_agent(payload: dict[str, str | None]) -> None:
                 pass
             continue
 
-        # browser-use may swallow an LLM error into history (max_failures reached)
-        # rather than raising. If the run made no progress and recorded errors,
-        # treat it as a provider failure and fall back instead of reporting it.
-        run_errors = [error for error in history.errors() if error]
-        if not history.is_done() and history.number_of_steps() < 2 and run_errors:
-            last_error = RuntimeError(f"{label} made no progress: {run_errors[-1]}")
+        # browser-use often swallows an LLM/transport error into history (once
+        # max_failures is reached) instead of raising it. If the run didn't
+        # finish and logged a provider-level error (Groq 413 TPM, Gemini 503,
+        # quota…), fall back to the next provider rather than reporting failure.
+        run_errors = [str(error) for error in history.errors() if error]
+        if not history.is_done() and any(is_provider_error(e) for e in run_errors):
+            last_error = RuntimeError(f"{label} failed: {run_errors[-1]}")
             print(
-                f"[Browser-Use] {label} made no progress ({run_errors[-1]}). "
+                f"[Browser-Use] {label} hit a provider error ({run_errors[-1]}). "
                 f"Trying the next provider…",
                 file=sys.stderr,
                 flush=True,

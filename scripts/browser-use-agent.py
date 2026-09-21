@@ -31,10 +31,12 @@ source websites (not only Google result pages). Use the requested source's own
 listing or search pages and include direct listing URLs in the final report.
 """
 
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
 
 def _google_model_available(model: str, api_key: str, timeout: int = 8) -> bool:
-    """A tiny probe: is this Gemini model actually answering right now? Treats
-    503 (overloaded) / 500 / 429 (rate-limited) as 'not usable now'."""
+    """A tiny probe: is this Gemini model actually answering right now? Only a
+    real 200 counts — 404/403 = not on this key, 429/503 = throttled/overloaded."""
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent?key={api_key}"
@@ -52,41 +54,89 @@ def _google_model_available(model: str, api_key: str, timeout: int = 8) -> bool:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status == 200
     except urllib.error.HTTPError:
-        # Only a real 200 counts. 404/403 = not accessible on this key,
-        # 429/503 = throttled/overloaded right now — all mean "try another".
         return False
     except Exception:
         return False
 
 
-def select_google_model(api_key: str) -> str:
-    """Pick the first candidate model that is actually available, so a single
-    overloaded model (503) does not stall the whole run. Order: the configured
-    model, then a list of stable fallbacks. Override with BROWSER_USE_GOOGLE_MODELS
-    (comma-separated)."""
-    listed = os.getenv("BROWSER_USE_GOOGLE_MODELS", "")
-    candidates = [item.strip() for item in listed.split(",") if item.strip()]
-    if not candidates:
-        candidates = [
+def build_llm_candidates() -> list[tuple[str, "callable"]]:
+    """Ordered fallback chain of (label, factory) LLMs. The run loop tries each
+    in turn — if one provider/model fails (Groq 413 TPM, Gemini 503/404, …) it
+    moves to the next. Order starts with BROWSER_USE_LLM_PROVIDER, then the rest.
+    """
+    provider = (os.getenv("BROWSER_USE_LLM_PROVIDER") or "groq").lower()
+    groq_key = os.getenv("GROQ_API_KEY")
+    google_key = os.getenv("GOOGLE_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
+    browseruse_key = os.getenv("BROWSER_USE_API_KEY")
+
+    def groq_items():
+        if not groq_key:
+            return []
+        model = os.getenv("BROWSER_USE_GROQ_MODEL", "openai/gpt-oss-120b")
+        # Groq is OpenAI-compatible. The two flags keep non-OpenAI Groq models
+        # (gpt-oss, qwen) working by putting the action schema in the prompt.
+        return [
+            (
+                f"groq:{model}",
+                lambda: ChatOpenAI(
+                    model=model,
+                    api_key=groq_key,
+                    base_url=GROQ_BASE_URL,
+                    add_schema_to_system_prompt=True,
+                    dont_force_structured_output=True,
+                    max_completion_tokens=8192,
+                ),
+            )
+        ]
+
+    def google_items():
+        if not google_key:
+            return []
+        listed = os.getenv("BROWSER_USE_GOOGLE_MODELS", "")
+        models = [m.strip() for m in listed.split(",") if m.strip()] or [
             os.getenv("BROWSER_USE_GOOGLE_MODEL", "gemini-flash-latest"),
             "gemini-flash-latest",
             "gemini-pro-latest",
         ]
-    seen: set[str] = set()
-    ordered = [c for c in candidates if not (c in seen or seen.add(c))]
+        seen: set[str] = set()
+        models = [m for m in models if not (m in seen or seen.add(m))]
+        # Probe so we don't spin up a browser for a model that's dead right now;
+        # if none pass, keep the first so the run loop can still surface its error.
+        available = [m for m in models if _google_model_available(m, google_key)]
+        chosen = available or models[:1]
+        return [
+            (f"google:{m}", (lambda m=m: ChatGoogle(model=m))) for m in chosen
+        ]
 
-    for model in ordered:
-        if _google_model_available(model, api_key):
-            print(f"[Browser-Use] using Gemini model: {model}", file=sys.stderr, flush=True)
-            return model
+    def openai_items():
+        if not openai_key:
+            return []
+        model = os.getenv("BROWSER_USE_OPENAI_MODEL", "gpt-4o-mini")
+        return [(f"openai:{model}", lambda: ChatOpenAI(model=model))]
 
-    print(
-        f"[Browser-Use] no candidate Gemini model responded OK (overloaded/rate-limited); "
-        f"trying {ordered[0]} anyway",
-        file=sys.stderr,
-        flush=True,
-    )
-    return ordered[0]
+    def browseruse_items():
+        if not browseruse_key:
+            return []
+        return [("browser-use", lambda: ChatBrowserUse())]
+
+    order = {
+        "groq": [groq_items, google_items, openai_items, browseruse_items],
+        "google": [google_items, groq_items, openai_items, browseruse_items],
+        "openai": [openai_items, groq_items, google_items, browseruse_items],
+        "browser-use": [browseruse_items, groq_items, google_items, openai_items],
+    }.get(provider, [groq_items, google_items, openai_items, browseruse_items])
+
+    candidates: list[tuple[str, "callable"]] = []
+    for group in order:
+        candidates.extend(group())
+
+    if not candidates:
+        raise ValueError(
+            "No LLM provider key set. Provide GROQ_API_KEY, GOOGLE_API_KEY, "
+            "OPENAI_API_KEY, or BROWSER_USE_API_KEY."
+        )
+    return candidates
 
 
 def source_domains(urls: list[str]) -> list[str]:
@@ -109,102 +159,7 @@ def source_domains(urls: list[str]) -> list[str]:
     )
 
 
-async def run_agent(payload: dict[str, str | None]) -> None:
-    task = (payload.get("task") or "").encode("utf-8", "replace").decode("utf-8").strip()
-    if not task:
-        raise ValueError("A non-empty browser task is required")
-
-    browser_options = {
-        "headless": payload.get("headless", "false").lower() == "true",
-        "keep_alive": os.getenv("BROWSER_USE_KEEP_BROWSER_OPEN", "true").lower()
-        == "true",
-    }
-    if payload.get("cdpUrl"):
-        browser_options.update(cdp_url=payload["cdpUrl"], is_local=False)
-
-    browser = Browser(**browser_options)
-    provider = (os.getenv("BROWSER_USE_LLM_PROVIDER") or "google").lower()
-    if provider == "browser-use":
-        if not os.getenv("BROWSER_USE_API_KEY"):
-            raise ValueError(
-                "BROWSER_USE_API_KEY is required when BROWSER_USE_LLM_PROVIDER=browser-use"
-            )
-        llm = ChatBrowserUse()
-    elif provider == "google":
-        google_key = os.getenv("GOOGLE_API_KEY")
-        if not google_key:
-            raise ValueError(
-                "GOOGLE_API_KEY is required when BROWSER_USE_LLM_PROVIDER=google"
-            )
-        llm = ChatGoogle(model=select_google_model(google_key))
-    elif provider == "openai":
-        if not os.getenv("OPENAI_API_KEY"):
-            raise ValueError(
-                "OPENAI_API_KEY is required when BROWSER_USE_LLM_PROVIDER=openai"
-            )
-        llm = ChatOpenAI(
-            model=os.getenv("BROWSER_USE_OPENAI_MODEL", "gpt-4o-mini")
-        )
-    elif provider == "groq":
-        # Groq exposes an OpenAI-compatible API, so reuse ChatOpenAI pointed at
-        # Groq's endpoint. Its LPU serving is fast and reliable, which is why we
-        # prefer it over Gemini's frequently-overloaded free tier. The two flags
-        # keep it compatible with non-OpenAI models (Groq hosts gpt-oss, qwen,
-        # etc.) by describing the action schema in the prompt instead of forcing
-        # OpenAI structured-output mode.
-        groq_key = os.getenv("GROQ_API_KEY")
-        if not groq_key:
-            raise ValueError(
-                "GROQ_API_KEY is required when BROWSER_USE_LLM_PROVIDER=groq"
-            )
-        llm = ChatOpenAI(
-            model=os.getenv("BROWSER_USE_GROQ_MODEL", "openai/gpt-oss-120b"),
-            api_key=groq_key,
-            base_url="https://api.groq.com/openai/v1",
-            add_schema_to_system_prompt=True,
-            dont_force_structured_output=True,
-            max_completion_tokens=8192,
-        )
-    else:
-        raise ValueError(
-            "BROWSER_USE_LLM_PROVIDER must be groq, google, openai, or browser-use"
-        )
-
-    # Vision (sending screenshots to the LLM each step) is the biggest per-step
-    # cost. It helps on visually complex pages but slows text/research tasks a
-    # lot, so make it a switch — set BROWSER_USE_USE_VISION=false for speed.
-    use_vision = os.getenv("BROWSER_USE_USE_VISION", "true").lower() == "true"
-
-    agent = Agent(
-        task=task,
-        browser=browser,
-        llm=llm,
-        extend_system_message=RESEARCH_POLICY,
-        use_vision=use_vision,
-        max_actions_per_step=3,
-        max_failures=int(os.getenv("BROWSER_USE_MAX_FAILURES", "1")),
-        directly_open_url=True,
-    )
-    try:
-        async def on_step_end(current_agent) -> None:
-            print(
-                f"[Browser-Use] completed step {current_agent.state.n_steps}",
-                file=sys.stderr,
-                flush=True,
-            )
-
-        history = await agent.run(
-            # 40 steps is plenty for a demo task and bounds the worst case;
-            # raise BROWSER_USE_MAX_STEPS for genuinely long jobs.
-            max_steps=int(os.getenv("BROWSER_USE_MAX_STEPS", "40")),
-            on_step_end=on_step_end,
-        )
-    except Exception:
-        # Keep successful sessions inspectable, but never leave failed/quota-
-        # exhausted Chrome sessions running in the background.
-        await browser.kill()
-        raise
-
+def report_history(history, task: str) -> None:
     urls = history.urls()
     domains = source_domains(urls)
     is_internship_search = "internship" in task.lower()
@@ -235,4 +190,118 @@ async def run_agent(payload: dict[str, str | None]) -> None:
     )
 
 
-asyncio.run(run_agent(json.load(sys.stdin)))
+async def run_agent(payload: dict[str, str | None]) -> None:
+    task = (payload.get("task") or "").encode("utf-8", "replace").decode("utf-8").strip()
+    if not task:
+        raise ValueError("A non-empty browser task is required")
+
+    keep_alive = os.getenv("BROWSER_USE_KEEP_BROWSER_OPEN", "true").lower() == "true"
+    headless = (payload.get("headless", "false") or "false").lower() == "true"
+    cdp_url = payload.get("cdpUrl")
+    # Vision (screenshots to the LLM) is the biggest per-step cost and is off by
+    # default; set BROWSER_USE_USE_VISION=true to re-enable for visual pages.
+    use_vision = os.getenv("BROWSER_USE_USE_VISION", "false").lower() == "true"
+
+    candidates = build_llm_candidates()
+
+    async def on_step_end(current_agent) -> None:
+        print(
+            f"[Browser-Use] completed step {current_agent.state.n_steps}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    last_error: Exception | None = None
+    for label, make_llm in candidates:
+        try:
+            llm = make_llm()
+        except Exception as error:  # noqa: BLE001 - want to try the next provider
+            last_error = error
+            print(
+                f"[Browser-Use] cannot init {label}: {error}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+
+        browser_options = {"headless": headless, "keep_alive": keep_alive}
+        if cdp_url:
+            browser_options.update(cdp_url=cdp_url, is_local=False)
+        browser = Browser(**browser_options)
+
+        agent = Agent(
+            task=task,
+            browser=browser,
+            llm=llm,
+            extend_system_message=RESEARCH_POLICY,
+            use_vision=use_vision,
+            max_actions_per_step=3,
+            max_failures=int(os.getenv("BROWSER_USE_MAX_FAILURES", "1")),
+            # Keep the per-step prompt small (matters on token-tight tiers like
+            # Groq free = 8k TPM): cap replayed history and DOM attributes.
+            max_history_items=int(os.getenv("BROWSER_USE_MAX_HISTORY", "6")),
+            include_attributes=[
+                "title",
+                "type",
+                "name",
+                "role",
+                "aria-label",
+                "placeholder",
+                "value",
+                "alt",
+                "href",
+            ],
+            directly_open_url=True,
+        )
+
+        print(f"[Browser-Use] attempting with {label}", file=sys.stderr, flush=True)
+        try:
+            history = await agent.run(
+                # 40 steps bounds the worst case; raise BROWSER_USE_MAX_STEPS
+                # for genuinely long jobs.
+                max_steps=int(os.getenv("BROWSER_USE_MAX_STEPS", "40")),
+                on_step_end=on_step_end,
+            )
+        except Exception as error:  # noqa: BLE001 - fall back to the next provider
+            last_error = error
+            print(
+                f"[Browser-Use] {label} failed: {type(error).__name__}: {error}. "
+                f"Trying the next provider…",
+                file=sys.stderr,
+                flush=True,
+            )
+            try:
+                await browser.kill()
+            except Exception:
+                pass
+            continue
+
+        # browser-use may swallow an LLM error into history (max_failures reached)
+        # rather than raising. If the run made no progress and recorded errors,
+        # treat it as a provider failure and fall back instead of reporting it.
+        run_errors = [error for error in history.errors() if error]
+        if not history.is_done() and history.number_of_steps() < 2 and run_errors:
+            last_error = RuntimeError(f"{label} made no progress: {run_errors[-1]}")
+            print(
+                f"[Browser-Use] {label} made no progress ({run_errors[-1]}). "
+                f"Trying the next provider…",
+                file=sys.stderr,
+                flush=True,
+            )
+            try:
+                await browser.kill()
+            except Exception:
+                pass
+            continue
+
+        report_history(history, task)
+        return
+
+    # Every candidate failed.
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("All LLM providers failed without a captured error.")
+
+
+if __name__ == "__main__":
+    asyncio.run(run_agent(json.load(sys.stdin)))

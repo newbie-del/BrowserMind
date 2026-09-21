@@ -1,0 +1,155 @@
+import asyncio
+import json
+import os
+from pathlib import Path
+import sys
+
+from dotenv import load_dotenv
+from browser_use import Agent, Browser, ChatGoogle, ChatOpenAI
+from browser_use import ChatBrowserUse
+
+
+SCRIPT_PATH = Path(__file__).resolve()
+load_dotenv(SCRIPT_PATH.parents[1] / ".env")
+load_dotenv(SCRIPT_PATH.parents[2] / ".env", override=True)
+
+RESEARCH_POLICY = """
+For research and listing tasks, do not stop after opening one website or applying
+one filter. Visit multiple requested sources, collect and verify the requested
+number of current results, and return the requested fields in a compact table.
+Prefer direct listing or application URLs. Check that listings are current and
+discard expired, closed, or duplicate results. If a site blocks access, record
+that limitation and continue with the next source. Do not apply, submit forms,
+send messages, or change account settings.
+Reuse the same browser window and existing tabs whenever possible. Open a new
+tab only when a separate source must stay available for comparison. Do not
+launch a second browser session.
+For internship searches, navigate directly to at least four of the requested
+source websites (not only Google result pages). Use the requested source's own
+listing or search pages and include direct listing URLs in the final report.
+"""
+
+
+def source_domains(urls: list[str]) -> list[str]:
+    known = (
+        "linkedin.com",
+        "internshala.com",
+        "indeed.com",
+        "naukri.com",
+        "unstop.com",
+        "wellfound.com",
+        "cutshort.io",
+    )
+    return sorted(
+        {
+            domain
+            for url in urls
+            for domain in known
+            if domain in url.lower()
+        }
+    )
+
+
+async def run_agent(payload: dict[str, str | None]) -> None:
+    task = (payload.get("task") or "").encode("utf-8", "replace").decode("utf-8").strip()
+    if not task:
+        raise ValueError("A non-empty browser task is required")
+
+    browser_options = {
+        "headless": payload.get("headless", "false").lower() == "true",
+        "keep_alive": os.getenv("BROWSER_USE_KEEP_BROWSER_OPEN", "true").lower()
+        == "true",
+    }
+    if payload.get("cdpUrl"):
+        browser_options.update(cdp_url=payload["cdpUrl"], is_local=False)
+
+    browser = Browser(**browser_options)
+    provider = (os.getenv("BROWSER_USE_LLM_PROVIDER") or "google").lower()
+    if provider == "browser-use":
+        if not os.getenv("BROWSER_USE_API_KEY"):
+            raise ValueError(
+                "BROWSER_USE_API_KEY is required when BROWSER_USE_LLM_PROVIDER=browser-use"
+            )
+        llm = ChatBrowserUse()
+    elif provider == "google":
+        if not os.getenv("GOOGLE_API_KEY"):
+            raise ValueError(
+                "GOOGLE_API_KEY is required when BROWSER_USE_LLM_PROVIDER=google"
+            )
+        llm = ChatGoogle(
+            model=os.getenv(
+                "BROWSER_USE_GOOGLE_MODEL", "gemini-3.1-flash-lite"
+            )
+        )
+    elif provider == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ValueError(
+                "OPENAI_API_KEY is required when BROWSER_USE_LLM_PROVIDER=openai"
+            )
+        llm = ChatOpenAI(
+            model=os.getenv("BROWSER_USE_OPENAI_MODEL", "gpt-4o-mini")
+        )
+    else:
+        raise ValueError(
+            "BROWSER_USE_LLM_PROVIDER must be google, openai, or browser-use"
+        )
+
+    agent = Agent(
+        task=task,
+        browser=browser,
+        llm=llm,
+        extend_system_message=RESEARCH_POLICY,
+        use_vision=True,
+        max_actions_per_step=3,
+        max_failures=int(os.getenv("BROWSER_USE_MAX_FAILURES", "1")),
+        directly_open_url=True,
+    )
+    try:
+        async def on_step_end(current_agent) -> None:
+            print(
+                f"[Browser-Use] completed step {current_agent.state.n_steps}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        history = await agent.run(
+            max_steps=int(os.getenv("BROWSER_USE_MAX_STEPS", "80")),
+            on_step_end=on_step_end,
+        )
+    except Exception:
+        # Keep successful sessions inspectable, but never leave failed/quota-
+        # exhausted Chrome sessions running in the background.
+        await browser.kill()
+        raise
+
+    urls = history.urls()
+    domains = source_domains(urls)
+    is_internship_search = "internship" in task.lower()
+    source_requirement_met = not is_internship_search or len(domains) >= 4
+    message = history.final_result()
+    if is_internship_search and not source_requirement_met:
+        message = (
+            f"{message or 'The agent stopped before completing the research.'} "
+            f"Only {len(domains)} requested source domains were visited "
+            f"({', '.join(domains) or 'none'}); at least 4 are required."
+        )
+
+    print(
+        json.dumps(
+            {
+                "success": history.is_successful() and source_requirement_met,
+                "completed": history.is_done() and source_requirement_met,
+                "message": message,
+                "steps": history.number_of_steps(),
+                "urls": urls,
+                "sourceDomains": domains,
+                "actions": history.action_names(),
+                "errors": history.errors(),
+            },
+            default=str,
+        ),
+        flush=True,
+    )
+
+
+asyncio.run(run_agent(json.load(sys.stdin)))

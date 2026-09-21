@@ -1,0 +1,44 @@
+# ---- Node / Next.js ----
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+out/
+**/out/
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# ---- Environment / secrets ----
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# ---- Trigger.dev ----
+.trigger/
+**/.trigger/
+
+# ---- Python / Browser-Use engine ----
+**/.venv/
+**/__pycache__/
+*.pyc
+**/*.pyc
+
+# ---- Playwright / browser runtime caches ----
+**/.cache/
+**/playwright-report/
+
+# ---- Read-only reference repos (kept on disk, not part of BrowserMind) ----
+browser-os/
+reference/
+
+# ---- Stray / debug artifacts ----
+error/
+src/trigger/
+/trigger.config.ts
+
+# ---- Misc ----
+.DS_Store
+Thumbs.db

@@ -1,0 +1,298 @@
+You are working on my BrowserMind project.
+
+IMPORTANT — READ THIS ENTIRE FILE BEFORE WRITING ANY CODE.
+
+I have limited Claude Code credits. Every rule in this document exists to protect
+those credits. When any instruction below seems to conflict with "build the best
+possible version of X," the credit-conservation rule wins. Ask before assuming.
+
+==================================================
+WHAT BROWSERMIND IS
+==================================================
+
+BrowserMind is a collaborative AI browser-workflow SaaS.
+
+A user gives BrowserMind a natural-language goal. BrowserMind:
+
+1. Understands the goal.
+2. Creates an execution plan.
+3. Converts the goal into a visual workflow (a flowchart of steps).
+4. Lets the user/team review and edit the workflow.
+5. Assigns steps to humans or to BrowserMind's AI agent.
+6. Publishes a workflow version.
+7. Executes it using an AI agent that controls a real web browser.
+8. Shows the browser live while it works.
+9. Verifies important actions/results.
+10. Recovers from failures where possible.
+11. Pauses for human approval when required (submissions, sending emails, etc).
+12. Produces results and an audit trail.
+13. Saves useful workflow/task memory for reuse.
+14. Allows workflows to be reused or scheduled.
+
+THREE DEMO SCENARIOS (all three must work by the end):
+
+A. STUDENT FORM APPLICATION
+   "Fill my JEE application."
+   User uploads Aadhaar, Class 10 marksheet, Class 12 marksheet, photograph,
+   signature, category certificate. BrowserMind extracts info from each
+   document, understands the target form's fields, matches each document to
+   the correct upload field (a "photograph" field gets the photo file, a
+   "signature" field gets the signature file — never a random file), fills
+   text fields, uploads the right files, pauses for human approval before
+   final submission, and hands off OTP/CAPTCHA to the human.
+
+B. TPO / PLACEMENT WORKFLOW
+   "Find suitable software engineering opportunities this week."
+   Search sources → collect opportunities → extract info → check eligibility
+   → deduplicate → verify → shortlist → produce a report/email.
+
+C. TECHFEST SPONSORSHIP WORKFLOW
+   "Find companies that could sponsor our TechFest, verify relevance, prepare
+   personalized emails, and don't send anything without team approval."
+   Research → collect info → verify relevance → dedupe → shortlist → draft
+   personalized emails → checker → team review → human approval → send.
+   Different teammates can own different steps (Coordinator A = research,
+   Coordinator B = verification, Coordinator C = outreach review, Team Lead =
+   final approval, BrowserMind = browser research/execution).
+
+==================================================
+REFERENCE MATERIAL — WHAT TO REUSE, WHAT NOT TO BUILD
+==================================================
+
+Available reference repositories (read-only — see Rule 8):
+
+  ../code-with-antonio   — SaaS/UI/app foundation
+  ../browser-os          — CONCEPTS ONLY, see note below
+  ../browser-use         — browser execution engine
+  ../workflow-use        — goal → workflow generation
+
+CODE-WITH-ANTONIO — use as the SaaS/UI/workflow foundation. Inspect and reuse:
+auth, dashboard, sidebar, navigation, reusable components, workflow canvas,
+workflow editor, database patterns, task management, collaboration
+foundations. Do not recreate components that already exist here.
+
+BROWSER-USE — use as the actual browser execution layer. Reuse/adapt: browser
+session management, navigation, click/type/scroll, extraction, form filling,
+DOM/state understanding, screenshots/vision, the agent loop, custom actions,
+domain restrictions. Do not reinvent browser automation Browser-Use already
+provides.
+
+WORKFLOW-USE — use as the reference for natural-language → workflow
+generation, reusable workflows, workflow execution/storage, deterministic
+steps, self-healing/recovery concepts, workflow variables/outputs.
+
+BROWSEROS — READ-ONLY REFERENCE FOR CONCEPTS. BrowserOS is a Chromium fork
+built to run as a desktop application on one person's machine. Its C++
+browser-engine code and desktop coupling are NOT reusable inside a web SaaS
+and must NOT be built, compiled, or run as part of BrowserMind. What IS worth
+reading and borrowing as *ideas* (not code to execute):
+  - the shape of its agent tool set (navigate/click/type/scroll/extract/tabs)
+  - its MCP tool-naming conventions
+  - its action-timeline / activity-log UI concept
+  - its scheduled-task concept
+Do not attempt to convert BrowserOS into a multi-tenant remote service. That
+is a separate, enterprise-scale infrastructure project (comparable to what
+companies like Browserbase or Browserless sell), not something to build from
+scratch here.
+
+==================================================
+REMOTE BROWSER + LIVE VIEW — USE A PROVIDER, DO NOT BUILD INFRASTRUCTURE
+==================================================
+
+BrowserMind needs the user to see a live, remote browser session in the web
+app, with proper session isolation between users. Do NOT build this
+yourself (no custom Docker-per-user orchestration, no custom WebRTC/CDP
+streaming stack, no custom multi-tenant isolation layer). That is a
+distributed-systems project on its own and will consume the entire credit
+budget without a working result.
+
+Instead, integrate an existing remote-browser provider and connect Browser-Use
+to it:
+  - Preferred: Browserbase (has a free tier, gives isolated remote Chromium
+    sessions, an embeddable live-session view/iframe, and built-in session
+    replay/inspector) — or
+  - Alternative: Steel (open-source, self-hostable if we outgrow a hosted
+    free tier).
+
+Browser-Use already supports connecting to a remote CDP endpoint — point it
+at the provider's session instead of a local browser. This gets us live view,
+isolation, and replay without building any of it ourselves.
+
+If neither provider works for a specific requirement, stop and ask before
+building a custom alternative.
+
+==================================================
+CREDIT-CONSERVATION RULES
+==================================================
+
+RULE 1: Do not rewrite existing functionality unless necessary.
+RULE 2: Do not recreate UI components that already exist in the Antonio project.
+RULE 3: Do not build a browser automation engine from scratch (use Browser-Use).
+RULE 4: Do not build a Chromium/browser or remote-browser runtime from scratch
+        (use a provider per the section above).
+RULE 5: Do not clone or compile BrowserOS. Treat it as a reading reference only.
+RULE 6: Do not read entire repositories. Start with README, package.json,
+        project structure, then inspect only files needed for the current
+        feature.
+RULE 7: Do not install dependencies inside reference repositories.
+RULE 8: Do not modify reference repositories. Only ./browsermind-app (the
+        main project) should be actively modified.
+RULE 9: Before creating a new component, search the existing
+        BrowserMind/Antonio codebase for an equivalent.
+RULE 10: Before implementing browser behavior, check whether Browser-Use
+        already provides it.
+RULE 11: Before implementing workflow generation, check Workflow-Use first.
+RULE 12: Do not add a new dependency when an existing one already solves the
+        problem.
+RULE 13: Do not perform large refactors unless required to make the
+        architecture work.
+RULE 14: Do not generate large files or elaborate animations unless required.
+RULE 15: Reuse existing UI and reskin it (branding/theme) rather than
+        rebuilding it pixel-for-pixel.
+RULE 16: Build only the integrations needed for the three demo scenarios —
+        not a general integration platform.
+RULE 17: Do not create three separate apps/agents for Student/TPO/TechFest —
+        one workflow engine, three example workflows.
+RULE 18: Do not hard-code scenario-specific logic (e.g. no hard-coded
+        "JEE-specific" document matching) — build general document-to-field
+        matching that happens to handle all three scenarios.
+RULE 19: Do not attempt to bypass CAPTCHA. Hand off to the human.
+RULE 20: Never expose credentials or provider API secrets to the LLM or the
+        frontend.
+
+Before writing new code, ask:
+  "Does an existing file/component/service already solve this?"
+  "Does Browser-Use already provide this?"
+  "Does Workflow-Use already provide a useful reference for this?"
+  "Does the chosen remote-browser provider already solve this?"
+
+==================================================
+PHASE 0 — REQUIRED FIRST STEP
+==================================================
+
+Do NOT start coding yet. First inspect the repositories and produce:
+
+BROWSERMIND_IMPLEMENTATION_MAP.md, containing:
+1. Existing BrowserMind/main project structure.
+2. Antonio components that can be reused directly.
+3. Browser-Use components that can be reused/adapted.
+4. Workflow-Use components/concepts that can be reused.
+5. BrowserOS concepts worth borrowing (list only — not code to run).
+6. Chosen remote-browser provider and how Browser-Use will connect to it.
+7. Features that require new implementation, and why nothing existing covers them.
+
+Do not start major implementation until this map exists and I've reviewed it.
+
+==================================================
+IMPLEMENTATION ORDER
+==================================================
+
+Implement one phase at a time. After each phase: type-check, lint, run
+relevant tests, verify the app manually, and fix only issues caused by that
+phase — do not scope-creep into future phases.
+
+PHASE 1  — Stabilize existing main application.
+PHASE 2  — Authentication + organization + dashboard.
+PHASE 3  — Goal/task creation (natural-language input).
+PHASE 4  — Workflow generation (goal → workflow, via Workflow-Use concepts).
+PHASE 5  — Workflow canvas/editor (review + edit before publishing).
+PHASE 6  — Connect workflow execution to Browser-Use + remote-browser provider.
+PHASE 7  — Live browser execution UI (embed provider's live view + activity log).
+PHASE 8  — Observer + verifier + failure recovery.
+PHASE 9  — Human approval gates (pause/resume/approve/reject/ask-user).
+PHASE 10 — Document upload + document analysis/extraction.
+PHASE 11 — Document-to-form-field mapping (general, not scenario-specific).
+PHASE 12 — Team collaboration (multiple people on one workflow).
+PHASE 13 — Workflow versioning (editing creates a new version, doesn't mutate
+           a running execution).
+PHASE 14 — Scheduled workflows (trigger an existing workflow on a schedule —
+           do not build a separate automation system for this).
+PHASE 15 — Integrations needed for the three demo scenarios only.
+PHASE 16 — Memory + audit trail + basic analytics.
+PHASE 17 — UI polish (see design theme below).
+
+==================================================
+DATABASE
+==================================================
+
+Use the existing database technology in the main project if practical. Do not
+replace it just because a reference repo uses a different ORM.
+
+Core entities (conceptual — adapt names/shape to fit the existing schema):
+User, Organization, Membership, Workflow, WorkflowVersion, WorkflowNode,
+WorkflowEdge, Task, Execution, ExecutionStep, Approval, Document,
+DocumentExtraction, BrowserSession, Integration, Schedule, AuditLog, Memory.
+
+==================================================
+SECURITY / APPROVAL
+==================================================
+
+Sensitive actions require a policy/approval gate: final application
+submission, sending external emails, payment, destructive actions, account
+changes. OTP and CAPTCHA always require human intervention — never attempt
+to bypass them. Credentials must never be exposed directly to the LLM; use
+the remote-browser provider's authenticated-session mechanisms instead.
+
+==================================================
+EXECUTION UI
+==================================================
+
+While an agent runs, the user should see: current workflow step, the live
+remote browser (via the provider's embeddable view), current URL, current
+action, completed/failed steps, recovery attempts, approval state, and an
+activity timeline (e.g. "✓ Opened website / ✓ Filled personal details /
+● Uploading photograph / ○ Verify / ○ Approval / ○ Submit").
+
+==================================================
+LICENSES
+==================================================
+
+Inspect the LICENSE file of every reference repository before copying any
+source code. Respect attribution requirements. Prefer consuming a capability
+as a dependency/API (e.g. the remote-browser provider's SDK) over copying
+source code, whenever that's technically viable.
+
+==================================================
+DESIGN THEME
+==================================================
+
+Clean white/light SaaS interface: white backgrounds, subtle gray borders,
+minimal and professional, neutral gray/black typography, blue used only as a
+subtle accent (not the overall theme). Avoid dark-mode-first styling. Keep
+cards, buttons, inputs, tables, workflow nodes, and dashboards visually
+consistent across all three demo scenarios. Workflow canvas should stay
+clean and spacious with clear node differentiation. Do not spend significant
+time/tokens on visual polish until Phase 17 — functional correctness first.
+
+==================================================
+WHAT NOT TO DO (SUMMARY)
+==================================================
+
+Do NOT: rewrite the whole app; compile or run BrowserOS; build a custom
+remote-browser/streaming/container-orchestration stack; build a browser
+automation engine from scratch; build 40 integrations; build every possible
+workflow node type; create separate apps/agents per scenario; hard-code
+scenario-specific logic; attempt CAPTCHA bypass; expose credentials to the
+model; perform large refactors without evidence; modify reference
+repositories; re-explain obvious implementation details repeatedly.
+
+==================================================
+ACCEPTANCE TEST
+==================================================
+
+The implementation is complete when I can, entirely from the browser (no
+terminal):
+1. Log in, open the dashboard.
+2. Type a goal (e.g. the JEE, TPO, or TechFest example above) and get a
+   generated workflow.
+3. Review/edit the workflow on the canvas and publish it.
+4. Run it, and watch the live remote browser execute steps in the UI.
+5. See the activity timeline update in real time.
+6. Get paused for approval at the right point, approve it, and see it resume.
+7. See the completed result, the audit trail, and be able to replay the
+   session afterward.
+8. Do this for all three demo scenarios using the same underlying engine
+   (not three separate implementations).
+
+Start with PHASE 0. Do not begin PHASE 1 until
+BROWSERMIND_IMPLEMENTATION_MAP.md is complete and I've reviewed it.

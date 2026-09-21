@@ -1,0 +1,13 @@
+{
+  "name": "browsermind",
+  "private": true,
+  "description": "BrowserMind - AI browser-workflow app (Next.js app + Browser-Use engine in one repo).",
+  "scripts": {
+    "dev": "cd browser-automation-app && npm run dev",
+    "build": "cd browser-automation-app && npm run build",
+    "lint": "cd browser-automation-app && npm run lint",
+    "typecheck": "cd browser-automation-app && npm run typecheck",
+    "dev:trigger": "cd browser-automation-app && npx trigger.dev@latest dev --env-file ..\\.env",
+    "demo:check": "npm run typecheck && npm run lint && npm run build"
+  }
+}

@@ -129,10 +129,11 @@ export async function runBrowserUseAgent({
   if (
     !process.env.BROWSER_USE_API_KEY &&
     !process.env.GOOGLE_API_KEY &&
-    !process.env.OPENAI_API_KEY
+    !process.env.OPENAI_API_KEY &&
+    !process.env.GROQ_API_KEY
   ) {
     throw new Error(
-      "OPENAI_API_KEY, GOOGLE_API_KEY, or BROWSER_USE_API_KEY is required for the Browser-Use agent."
+      "GROQ_API_KEY, GOOGLE_API_KEY, OPENAI_API_KEY, or BROWSER_USE_API_KEY is required for the Browser-Use agent."
     )
   }
 

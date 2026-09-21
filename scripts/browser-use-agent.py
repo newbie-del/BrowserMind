@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 import sys
+import urllib.error
+import urllib.request
 
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, ChatGoogle, ChatOpenAI
@@ -28,6 +30,63 @@ For internship searches, navigate directly to at least four of the requested
 source websites (not only Google result pages). Use the requested source's own
 listing or search pages and include direct listing URLs in the final report.
 """
+
+
+def _google_model_available(model: str, api_key: str, timeout: int = 8) -> bool:
+    """A tiny probe: is this Gemini model actually answering right now? Treats
+    503 (overloaded) / 500 / 429 (rate-limited) as 'not usable now'."""
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent?key={api_key}"
+    )
+    body = json.dumps(
+        {
+            "contents": [{"parts": [{"text": "ping"}]}],
+            "generationConfig": {"maxOutputTokens": 1},
+        }
+    ).encode()
+    request = urllib.request.Request(
+        url, data=body, headers={"content-type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except urllib.error.HTTPError:
+        # Only a real 200 counts. 404/403 = not accessible on this key,
+        # 429/503 = throttled/overloaded right now — all mean "try another".
+        return False
+    except Exception:
+        return False
+
+
+def select_google_model(api_key: str) -> str:
+    """Pick the first candidate model that is actually available, so a single
+    overloaded model (503) does not stall the whole run. Order: the configured
+    model, then a list of stable fallbacks. Override with BROWSER_USE_GOOGLE_MODELS
+    (comma-separated)."""
+    listed = os.getenv("BROWSER_USE_GOOGLE_MODELS", "")
+    candidates = [item.strip() for item in listed.split(",") if item.strip()]
+    if not candidates:
+        candidates = [
+            os.getenv("BROWSER_USE_GOOGLE_MODEL", "gemini-flash-latest"),
+            "gemini-flash-latest",
+            "gemini-pro-latest",
+        ]
+    seen: set[str] = set()
+    ordered = [c for c in candidates if not (c in seen or seen.add(c))]
+
+    for model in ordered:
+        if _google_model_available(model, api_key):
+            print(f"[Browser-Use] using Gemini model: {model}", file=sys.stderr, flush=True)
+            return model
+
+    print(
+        f"[Browser-Use] no candidate Gemini model responded OK (overloaded/rate-limited); "
+        f"trying {ordered[0]} anyway",
+        file=sys.stderr,
+        flush=True,
+    )
+    return ordered[0]
 
 
 def source_domains(urls: list[str]) -> list[str]:
@@ -72,15 +131,12 @@ async def run_agent(payload: dict[str, str | None]) -> None:
             )
         llm = ChatBrowserUse()
     elif provider == "google":
-        if not os.getenv("GOOGLE_API_KEY"):
+        google_key = os.getenv("GOOGLE_API_KEY")
+        if not google_key:
             raise ValueError(
                 "GOOGLE_API_KEY is required when BROWSER_USE_LLM_PROVIDER=google"
             )
-        llm = ChatGoogle(
-            model=os.getenv(
-                "BROWSER_USE_GOOGLE_MODEL", "gemini-3.1-flash-lite"
-            )
-        )
+        llm = ChatGoogle(model=select_google_model(google_key))
     elif provider == "openai":
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError(
@@ -89,9 +145,29 @@ async def run_agent(payload: dict[str, str | None]) -> None:
         llm = ChatOpenAI(
             model=os.getenv("BROWSER_USE_OPENAI_MODEL", "gpt-4o-mini")
         )
+    elif provider == "groq":
+        # Groq exposes an OpenAI-compatible API, so reuse ChatOpenAI pointed at
+        # Groq's endpoint. Its LPU serving is fast and reliable, which is why we
+        # prefer it over Gemini's frequently-overloaded free tier. The two flags
+        # keep it compatible with non-OpenAI models (Groq hosts gpt-oss, qwen,
+        # etc.) by describing the action schema in the prompt instead of forcing
+        # OpenAI structured-output mode.
+        groq_key = os.getenv("GROQ_API_KEY")
+        if not groq_key:
+            raise ValueError(
+                "GROQ_API_KEY is required when BROWSER_USE_LLM_PROVIDER=groq"
+            )
+        llm = ChatOpenAI(
+            model=os.getenv("BROWSER_USE_GROQ_MODEL", "openai/gpt-oss-120b"),
+            api_key=groq_key,
+            base_url="https://api.groq.com/openai/v1",
+            add_schema_to_system_prompt=True,
+            dont_force_structured_output=True,
+            max_completion_tokens=8192,
+        )
     else:
         raise ValueError(
-            "BROWSER_USE_LLM_PROVIDER must be google, openai, or browser-use"
+            "BROWSER_USE_LLM_PROVIDER must be groq, google, openai, or browser-use"
         )
 
     # Vision (sending screenshots to the LLM each step) is the biggest per-step

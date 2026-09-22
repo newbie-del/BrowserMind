@@ -127,13 +127,14 @@ export async function runBrowserUseAgent({
   task: string
 }): Promise<BrowserUseResult> {
   if (
+    !process.env.OPENROUTER_API_KEY &&
     !process.env.BROWSER_USE_API_KEY &&
     !process.env.GOOGLE_API_KEY &&
     !process.env.OPENAI_API_KEY &&
     !process.env.GROQ_API_KEY
   ) {
     throw new Error(
-      "GROQ_API_KEY, GOOGLE_API_KEY, OPENAI_API_KEY, or BROWSER_USE_API_KEY is required for the Browser-Use agent."
+      "OPENROUTER_API_KEY, GROQ_API_KEY, GOOGLE_API_KEY, OPENAI_API_KEY, or BROWSER_USE_API_KEY is required for the Browser-Use agent."
     )
   }
 
@@ -163,7 +164,9 @@ export async function runBrowserUseAgent({
       env: {
         ...process.env,
         ANONYMIZED_TELEMETRY: "false",
-        BROWSER_USE_MAX_FAILURES: "1",
+        // 3 lets the agent ride out a transient provider blip on the working
+        // model (qwen 502 / gemini 503) instead of dying after one failure.
+        BROWSER_USE_MAX_FAILURES: "3",
         BROWSER_USE_KEEP_BROWSER_OPEN: "true",
         PYTHONPATH: [sourcePath, process.env.PYTHONPATH]
           .filter(Boolean)

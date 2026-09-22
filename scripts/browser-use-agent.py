@@ -34,6 +34,7 @@ listing or search pages and include direct listing URLs in the final report.
 """
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def _google_model_available(model: str, api_key: str, timeout: int = 8) -> bool:
@@ -71,6 +72,29 @@ def build_llm_candidates() -> list[tuple[str, "callable"]]:
     google_key = os.getenv("GOOGLE_API_KEY")
     openai_key = os.getenv("OPENAI_API_KEY")
     browseruse_key = os.getenv("BROWSER_USE_API_KEY")
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+
+    def openrouter_items():
+        if not openrouter_key:
+            return []
+        model = os.getenv("BROWSER_USE_OPENROUTER_MODEL", "qwen/qwen3.8-27b:free")
+        # OpenRouter is OpenAI-compatible, so it reuses ChatOpenAI with a
+        # different base_url — no extra SDK. The two flags are the same ones
+        # Groq needs: they put the action schema in the system prompt so a
+        # non-OpenAI model (qwen) works without strict function-calling.
+        return [
+            (
+                f"openrouter:{model}",
+                lambda: ChatOpenAI(
+                    model=model,
+                    api_key=openrouter_key,
+                    base_url=OPENROUTER_BASE_URL,
+                    add_schema_to_system_prompt=True,
+                    dont_force_structured_output=True,
+                    max_completion_tokens=8192,
+                ),
+            )
+        ]
 
     def groq_items():
         if not groq_key:
@@ -123,11 +147,12 @@ def build_llm_candidates() -> list[tuple[str, "callable"]]:
         return [("browser-use", lambda: ChatBrowserUse())]
 
     order = {
-        "groq": [groq_items, google_items, openai_items, browseruse_items],
-        "google": [google_items, groq_items, openai_items, browseruse_items],
-        "openai": [openai_items, groq_items, google_items, browseruse_items],
-        "browser-use": [browseruse_items, groq_items, google_items, openai_items],
-    }.get(provider, [groq_items, google_items, openai_items, browseruse_items])
+        "openrouter": [openrouter_items, google_items, groq_items, openai_items, browseruse_items],
+        "groq": [groq_items, openrouter_items, google_items, openai_items, browseruse_items],
+        "google": [google_items, openrouter_items, groq_items, openai_items, browseruse_items],
+        "openai": [openai_items, openrouter_items, groq_items, google_items, browseruse_items],
+        "browser-use": [browseruse_items, openrouter_items, groq_items, google_items, openai_items],
+    }.get(provider, [openrouter_items, google_items, groq_items, openai_items, browseruse_items])
 
     candidates: list[tuple[str, "callable"]] = []
     for group in order:
@@ -135,8 +160,8 @@ def build_llm_candidates() -> list[tuple[str, "callable"]]:
 
     if not candidates:
         raise ValueError(
-            "No LLM provider key set. Provide GROQ_API_KEY, GOOGLE_API_KEY, "
-            "OPENAI_API_KEY, or BROWSER_USE_API_KEY."
+            "No LLM provider key set. Provide OPENROUTER_API_KEY, GROQ_API_KEY, "
+            "GOOGLE_API_KEY, OPENAI_API_KEY, or BROWSER_USE_API_KEY."
         )
     return candidates
 
@@ -259,15 +284,21 @@ async def run_agent(payload: dict[str, str | None]) -> None:
             index += 1
             continue
 
-        # Wire the next candidate as browser-use's native fallback_llm. On a
-        # mid-run rate-limit/overload/5xx (429/500/502/503/504, e.g. Gemini
-        # flash-latest 503) browser-use swaps to it in place — same browser, no
-        # teardown — which is cleaner than our whole-run restart. The restart
-        # loop below still covers init failures, non-retryable errors, and
-        # provider errors browser-use swallows into history (Groq 413 TPM).
+        # Optionally wire the next candidate as browser-use's native
+        # fallback_llm (in-place mid-run swap, same browser). DEFAULT OFF:
+        # browser-use switches on the FIRST error and never switches back, so a
+        # single transient blip on our most-reliable model (e.g. OpenRouter
+        # qwen 502) permanently demotes the run to a flakier fallback (Gemini
+        # 503). With it off we instead retry the same model (max_failures) and
+        # only change providers via the whole-run restart loop below. Turn on
+        # with BROWSER_USE_NATIVE_FALLBACK=true when the fallback is genuinely
+        # more reliable than the primary.
+        native_fallback = (
+            os.getenv("BROWSER_USE_NATIVE_FALLBACK", "false").lower() == "true"
+        )
         fallback_llm = None
         fallback_label: str | None = None
-        if index + 1 < len(candidates):
+        if native_fallback and index + 1 < len(candidates):
             fallback_label, make_fallback = candidates[index + 1]
             try:
                 fallback_llm = make_fallback()
@@ -293,7 +324,11 @@ async def run_agent(payload: dict[str, str | None]) -> None:
             extend_system_message=RESEARCH_POLICY,
             use_vision=use_vision,
             max_actions_per_step=3,
-            max_failures=int(os.getenv("BROWSER_USE_MAX_FAILURES", "1")),
+            # 3 (not 1) so a transient blip (qwen 502, gemini 503) is retried
+            # on the SAME model instead of killing the attempt — any successful
+            # step resets the counter. Deterministic errors (Groq 413) still
+            # fail fast and fall through to the next provider.
+            max_failures=int(os.getenv("BROWSER_USE_MAX_FAILURES", "3")),
             # Keep the per-step prompt small (matters on token-tight tiers like
             # Groq free = 8k TPM): cap replayed history and DOM attributes.
             max_history_items=int(os.getenv("BROWSER_USE_MAX_HISTORY", "6")),

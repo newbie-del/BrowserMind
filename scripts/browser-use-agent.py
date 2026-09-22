@@ -242,7 +242,11 @@ async def run_agent(payload: dict[str, str | None]) -> None:
         )
 
     last_error: Exception | None = None
-    for label, make_llm in candidates:
+    # Index-based walk so we can skip a candidate that browser-use's own
+    # fallback_llm already tried mid-run (advance by 2 instead of 1).
+    index = 0
+    while index < len(candidates):
+        label, make_llm = candidates[index]
         try:
             llm = make_llm()
         except Exception as error:  # noqa: BLE001 - want to try the next provider
@@ -252,7 +256,29 @@ async def run_agent(payload: dict[str, str | None]) -> None:
                 file=sys.stderr,
                 flush=True,
             )
+            index += 1
             continue
+
+        # Wire the next candidate as browser-use's native fallback_llm. On a
+        # mid-run rate-limit/overload/5xx (429/500/502/503/504, e.g. Gemini
+        # flash-latest 503) browser-use swaps to it in place — same browser, no
+        # teardown — which is cleaner than our whole-run restart. The restart
+        # loop below still covers init failures, non-retryable errors, and
+        # provider errors browser-use swallows into history (Groq 413 TPM).
+        fallback_llm = None
+        fallback_label: str | None = None
+        if index + 1 < len(candidates):
+            fallback_label, make_fallback = candidates[index + 1]
+            try:
+                fallback_llm = make_fallback()
+            except Exception as error:  # noqa: BLE001 - just skip a bad fallback
+                print(
+                    f"[Browser-Use] cannot init fallback {fallback_label}: {error}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                fallback_llm = None
+                fallback_label = None
 
         browser_options = {"headless": headless, "keep_alive": keep_alive}
         if cdp_url:
@@ -263,6 +289,7 @@ async def run_agent(payload: dict[str, str | None]) -> None:
             task=task,
             browser=browser,
             llm=llm,
+            fallback_llm=fallback_llm,
             extend_system_message=RESEARCH_POLICY,
             use_vision=use_vision,
             max_actions_per_step=3,
@@ -284,7 +311,16 @@ async def run_agent(payload: dict[str, str | None]) -> None:
             directly_open_url=True,
         )
 
-        print(f"[Browser-Use] attempting with {label}", file=sys.stderr, flush=True)
+        attempt_label = (
+            f"{label} (native fallback: {fallback_label})"
+            if fallback_label
+            else label
+        )
+        print(
+            f"[Browser-Use] attempting with {attempt_label}",
+            file=sys.stderr,
+            flush=True,
+        )
         try:
             history = await agent.run(
                 # 40 steps bounds the worst case; raise BROWSER_USE_MAX_STEPS
@@ -294,9 +330,12 @@ async def run_agent(payload: dict[str, str | None]) -> None:
             )
         except Exception as error:  # noqa: BLE001 - fall back to the next provider
             last_error = error
+            # If browser-use already swapped to the fallback mid-run and it too
+            # failed, skip that candidate rather than restarting to retry it.
+            step = 2 if agent.is_using_fallback_llm else 1
             print(
-                f"[Browser-Use] {label} failed: {type(error).__name__}: {error}. "
-                f"Trying the next provider…",
+                f"[Browser-Use] {attempt_label} failed: {type(error).__name__}: "
+                f"{error}. Trying the next provider…",
                 file=sys.stderr,
                 flush=True,
             )
@@ -304,6 +343,7 @@ async def run_agent(payload: dict[str, str | None]) -> None:
                 await browser.kill()
             except Exception:
                 pass
+            index += step
             continue
 
         # browser-use often swallows an LLM/transport error into history (once
@@ -313,9 +353,10 @@ async def run_agent(payload: dict[str, str | None]) -> None:
         run_errors = [str(error) for error in history.errors() if error]
         if not history.is_done() and any(is_provider_error(e) for e in run_errors):
             last_error = RuntimeError(f"{label} failed: {run_errors[-1]}")
+            step = 2 if agent.is_using_fallback_llm else 1
             print(
-                f"[Browser-Use] {label} hit a provider error ({run_errors[-1]}). "
-                f"Trying the next provider…",
+                f"[Browser-Use] {attempt_label} hit a provider error "
+                f"({run_errors[-1]}). Trying the next provider…",
                 file=sys.stderr,
                 flush=True,
             )
@@ -323,6 +364,7 @@ async def run_agent(payload: dict[str, str | None]) -> None:
                 await browser.kill()
             except Exception:
                 pass
+            index += step
             continue
 
         report_history(history, task)

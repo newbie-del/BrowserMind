@@ -1,6 +1,9 @@
 """About:blank watchdog for managing about:blank tabs with DVD screensaver."""
 
+import base64
+import os
 from typing import TYPE_CHECKING, ClassVar
+from pathlib import Path
 
 from bubus import BaseEvent
 from cdp_use.cdp.target import TargetID
@@ -138,6 +141,12 @@ class AboutBlankWatchdog(BaseWatchdog):
 			# Create temporary session for this target without switching focus
 			temp_session = await self.browser_session.get_or_create_cdp_session(target_id, focus=False)
 
+			logo_path = os.environ.get('BROWSERMIND_LOADING_LOGO_PATH')
+			logo_data_url = 'https://cf.browser-use.com/logo.svg'
+			if logo_path and Path(logo_path).is_file():
+				logo_data = base64.b64encode(Path(logo_path).read_bytes()).decode('ascii')
+				logo_data_url = f'data:image/png;base64,{logo_data}'
+
 			# Inject the DVD screensaver script (from main branch with idempotency added)
 			script = f"""
 				(function(browser_session_label) {{
@@ -177,8 +186,8 @@ class AboutBlankWatchdog(BaseWatchdog):
 
 					// Create the image element
 					const img = document.createElement('img');
-					img.src = 'https://cf.browser-use.com/logo.svg';
-					img.alt = 'Browser-Use';
+					img.src = '{logo_data_url}';
+					img.alt = 'BrowserMind';
 					img.style.width = '200px';
 					img.style.height = 'auto';
 					img.style.position = 'absolute';

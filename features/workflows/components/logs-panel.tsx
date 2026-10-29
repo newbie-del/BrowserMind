@@ -1,7 +1,8 @@
 "use client"
 
+import { useState, useTransition } from "react"
 import prettyMilliseconds from "pretty-ms"
-import { Lock, MonitorPlay } from "lucide-react"
+import { Check, Lock, MonitorPlay, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -9,9 +10,11 @@ import { NodeIcon } from "@/features/workflows/components/node-icon"
 import { useProPlan } from "@/features/workflows/hooks/use-pro-plan"
 import {
   useConsoleRuns,
+  useWorkflowRunsError,
   type ConsoleRun,
 } from "@/features/workflows/components/workflow-runs-provider"
 import type { RunStep } from "@/features/workflows/tasks/run-workflow"
+import { resolveWorkflowApprovalAction } from "@/features/workflows/actions"
 
 // A step is identified across the whole console by which run it belongs to and
 // which node it is — the same node id recurs across runs, so both are needed.
@@ -55,6 +58,14 @@ function StepRow({
   const isRunning = step.status === "running" && run.isLive
   const isFailed = step.status === "failed"
   const isInactive = step.status === "pending"
+  const isDone = step.status === "done"
+  const statusLabel = isRunning
+    ? "Executing"
+    : isFailed
+      ? "Failed"
+      : isDone
+        ? "Completed"
+        : "Waiting"
 
   return (
     <button
@@ -70,8 +81,18 @@ function StepRow({
       <span className={cn("truncate font-medium", isFailed && "text-destructive")}>
         {step.title}
       </span>
+      <span
+        className={cn(
+          "ml-auto flex shrink-0 items-center gap-1 text-[10px]",
+          isFailed ? "text-destructive" : "text-muted-foreground"
+        )}
+      >
+        {isDone && <Check aria-hidden="true" className="size-3 text-green-600" />}
+        {isFailed && <X aria-hidden="true" className="size-3" />}
+        {statusLabel}
+      </span>
       {step.durationMs != null && (
-        <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
+        <span className="shrink-0 tabular-nums text-muted-foreground">
           {prettyMilliseconds(step.durationMs)}
         </span>
       )}
@@ -145,6 +166,62 @@ function LiveRow({
   )
 }
 
+// A pending human-in-the-loop approval: the run is paused on a Trigger.dev
+// waitpoint. Approve/Reject completes the token and resumes the run. Renders
+// nothing unless this run is actually waiting for a decision.
+function ApprovalRow({ run }: { run: ConsoleRun }) {
+  const [isPending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+  const approval = run.approval
+  if (!approval || approval.status !== "pending" || !approval.tokenId) {
+    return null
+  }
+  const tokenId = approval.tokenId
+  const resolve = (approved: boolean) => {
+    setError(null)
+    startTransition(async () => {
+      try {
+        await resolveWorkflowApprovalAction({ tokenId, approved })
+      } catch (resolveError) {
+        setError(
+          resolveError instanceof Error
+            ? resolveError.message
+            : String(resolveError)
+        )
+      }
+    })
+  }
+  return (
+    <div className="mx-2 my-1 rounded-md border border-yellow-500/40 bg-yellow-500/10 p-2 text-xs">
+      <div className="mb-1 font-medium text-yellow-700 dark:text-yellow-400">
+        Approval required
+      </div>
+      {approval.reason && (
+        <p className="mb-2 text-muted-foreground">{approval.reason}</p>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={isPending}
+          onClick={() => resolve(true)}
+          className="rounded-md bg-green-600 px-2.5 py-1 font-medium text-white hover:bg-green-700 disabled:opacity-50"
+        >
+          {isPending ? "…" : "Approve"}
+        </button>
+        <button
+          type="button"
+          disabled={isPending}
+          onClick={() => resolve(false)}
+          className="rounded-md bg-red-600 px-2.5 py-1 font-medium text-white hover:bg-red-700 disabled:opacity-50"
+        >
+          Reject
+        </button>
+      </div>
+      {error && <p className="mt-1 text-destructive">{error}</p>}
+    </div>
+  )
+}
+
 // The list of runs, newest first, each with its steps below it. Reads the shared
 // realtime run history and reports step clicks up to the ConsolePanel, which owns
 // the selection.
@@ -156,17 +233,29 @@ export function LogsPanel({
   onSelect: (selection: ConsoleSelection) => void
 }) {
   const runs = useConsoleRuns()
+  const error = useWorkflowRunsError()
 
   if (runs.length === 0) {
     return (
-      <div className="flex size-full items-center justify-center text-sm text-muted-foreground">
-        No runs yet
+      <div
+        role={error ? "alert" : undefined}
+        className="flex size-full items-center justify-center px-4 text-center text-sm text-muted-foreground"
+      >
+        {error ? `Couldn't load run updates: ${error.message}` : "No runs yet"}
       </div>
     )
   }
 
   return (
     <div className="flex size-full flex-col gap-3 overflow-y-auto p-2">
+      {error && (
+        <div
+          role="alert"
+          className="rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-xs text-destructive"
+        >
+          Live run updates disconnected: {error.message}
+        </div>
+      )}
       {runs.map((run) => (
         <div key={run.id} className="flex flex-col gap-0.5">
           <div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-muted-foreground">
@@ -186,6 +275,7 @@ export function LogsPanel({
               onSelect={onSelect}
             />
           ))}
+          <ApprovalRow run={run} />
           {run.isLive && run.liveViewUrl && (
             <LiveRow
               run={run}
@@ -205,6 +295,22 @@ export function LogsPanel({
               }
               onSelect={onSelect}
             />
+          )}
+          {run.email && run.email.status !== "not-configured" && (
+            <div
+              className={cn(
+                "px-2 py-1 text-[11px]",
+                run.email.status === "failed"
+                  ? "text-destructive"
+                  : "text-muted-foreground"
+              )}
+            >
+              {run.email.status === "sent"
+                ? `Results email sent${run.email.to ? ` to ${run.email.to}` : ""}`
+                : run.email.status === "skipped"
+                  ? `Results email skipped${run.email.reason ? ` (${run.email.reason})` : ""}`
+                  : `Results email failed${run.email.error ? `: ${run.email.error}` : ""}`}
+            </div>
           )}
         </div>
       ))}

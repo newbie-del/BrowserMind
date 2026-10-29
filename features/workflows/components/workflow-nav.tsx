@@ -1,9 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
+import { useTransition } from "react"
 import { PlusIcon, WorkflowIcon } from "lucide-react"
 
+import { createWorkflowAction } from "@/features/workflows/actions"
 import {
   Popover,
   PopoverContent,
@@ -28,11 +30,13 @@ interface WorkflowNavProps {
 
 export function WorkflowNav({ workflows }: WorkflowNavProps) {
   const { state } = useSidebar()
-  const router = useRouter()
   const pathname = usePathname()
+  const [, startTransition] = useTransition()
 
   const handleCreateWorkflow = () => {
-    router.push("/")
+    startTransition(async () => {
+      await createWorkflowAction("Untitled workflow")
+    })
   }
 
   const workflowItems = workflows.map((workflow) => (

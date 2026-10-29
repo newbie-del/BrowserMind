@@ -25,5 +25,27 @@ export function validateGraph({ nodes, edges }: WorkflowGraph): string[] {
     }
   }
 
+  const desktopNodes = nodes.filter(
+    (node) => node.data.type === "desktop-control"
+  )
+  if (desktopNodes.length > 0) {
+    if (desktopNodes.length !== 1) {
+      problems.push("A workflow can contain only one Desktop Agent node.")
+    }
+    if (
+      nodes.some(
+        (node) =>
+          node.data.type !== "start" && node.data.type !== "desktop-control"
+      )
+    ) {
+      problems.push(
+        "Desktop Agent workflows currently support only a Start node and one Desktop Agent node."
+      )
+    }
+    if (!desktopNodes[0]?.data.values.instruction?.trim()) {
+      problems.push("Enter an instruction for the Desktop Agent node.")
+    }
+  }
+
   return problems
 }

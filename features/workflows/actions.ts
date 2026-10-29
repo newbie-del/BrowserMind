@@ -2,14 +2,14 @@
 
 import * as Sentry from "@sentry/nextjs"
 import { auth } from "@clerk/nextjs/server"
-import { runs, tasks } from "@trigger.dev/sdk"
+import { runs, tasks, wait } from "@trigger.dev/sdk"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
 import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow";
 
 import { liveblocks } from "@/lib/liveblocks"
-import { createWorkflow, deleteWorkflow, saveWorkflowGraph } from "@/features/workflows/data"
+import { createWorkflow, deleteWorkflow, saveWorkflowGraph, updateWorkflowName } from "@/features/workflows/data"
 import { planWorkflowFromGoal } from "@/features/workflows/lib/plan-workflow"
 import { WorkflowGraph } from "@/lib/db/schema"
 
@@ -134,7 +134,7 @@ export async function runWorkflowAction({
   })
 
   const hasAgentNode = graph.nodes.some((node) => node.data.type === "agent")
-  if (hasAgentNode && !has({ plan: "pro" })) {
+  if (hasAgentNode && !has({ plan: "org:pro" })) {
     Sentry.logger.warn("Workflow run denied — Agent node requires Pro plan", {
       workflowId: id,
       orgId,
@@ -182,4 +182,45 @@ export async function cancelWorkflowRunAction(runId: string) {
   await runs.cancel(runId)
 
   Sentry.logger.info("Workflow run cancelled", { runId, orgId })
+}
+
+// Completes the Trigger.dev waitpoint token a paused run is waiting on, so the
+// run resumes (approved → final action proceeds; rejected → it is skipped).
+export async function resolveWorkflowApprovalAction({
+  tokenId,
+  approved,
+  reason,
+}: {
+  tokenId: string
+  approved: boolean
+  reason?: string
+}) {
+  const { orgId } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  Sentry.getIsolationScope().setAttributes({
+    action: "resolveWorkflowApprovalAction",
+    orgId,
+    approved,
+  })
+
+  await wait.completeToken<{ approved: boolean; reason?: string }>(tokenId, {
+    approved,
+    reason,
+  })
+
+  Sentry.logger.info("Workflow approval resolved", { tokenId, orgId, approved })
+}
+
+export async function renameWorkflowAction(id: string, name: string) {
+  const { orgId } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error("Enter a workflow name.")
+
+  await updateWorkflowName({ orgId, id, name: trimmed })
+
+  revalidatePath("/workflows", "layout")
+  revalidatePath(`/workflows/${id}`)
 }

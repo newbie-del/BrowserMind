@@ -86,6 +86,12 @@ function intentHints(goal: string) {
       /\b(find|search|research|collect|compare|list|shortlist|gather|opportunit|compan(y|ies)|certificat|job)\b/.test(
         text
       ),
+    // A consequential action the user should approve before it happens:
+    // payment, a registration fee, a purchase, enrolment. ₹/Rs/INR counts too.
+    involvesSensitive:
+      /\b(pay|payment|fee|registration|register|purchase|buy|checkout|deposit|enrol|enroll|subscribe|donate)\b/.test(
+        text
+      ) || /₹|\brs\.?\b|\binr\b/.test(text),
   }
 }
 
@@ -97,6 +103,138 @@ function firstUrl(goal: string): string | undefined {
   return match?.[0]
 }
 
+function explicitlyProhibitsApplication(goal: string): boolean {
+  const negation =
+    /\b(do not|don'?t|never|must not|mustn'?t|should not|shouldn'?t|avoid)\b/i
+
+  for (const sentence of goal.split(/(?<=[.!?])\s+|\n+/)) {
+    let negated = false
+    for (const clause of sentence.split(/,\s*/)) {
+      const match = negation.exec(clause)
+      if (
+        match &&
+        /\b(apply|submit)\b/i.test(
+          clause.slice(match.index + match[0].length)
+        )
+      ) {
+        return true
+      }
+      if (match) negated = true
+      if (negated && /\b(apply|submit)\b/i.test(clause)) return true
+    }
+  }
+
+  return false
+}
+
+export function isInternshipApplicationGoal(goal: string): boolean {
+  const text = positiveText(goal)
+  return (
+    !explicitlyProhibitsApplication(goal) &&
+    /\binternships?\b/i.test(text) &&
+    /\b(?:apply|application|submit)\b/i.test(text)
+  )
+}
+
+export function directInternshipListingUrl(goal: string): string | undefined {
+  const urls =
+    positiveText(goal).match(
+      /\bhttps?:\/\/(?:www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?/gi
+    ) ?? []
+  return urls.length === 1 ? urls[0] : undefined
+}
+
+export function buildInternshipApplicationGraph(goal: string): WorkflowGraph {
+  const url = directInternshipListingUrl(goal)
+  if (!url) {
+    throw new Error("An internship application workflow needs a direct listing URL.")
+  }
+
+  const nodes: StepNodeType[] = [
+    stepNode({
+      id: "start",
+      type: "start",
+      title: "Start",
+      position: { x: 0, y: 0 },
+    }),
+    stepNode({
+      id: "internship-approval",
+      type: "approval",
+      title: "Approve one application",
+      values: {
+        reason: `Approve BrowserMind to submit one internship application at ${url}. Review the goal and attached documents before approving.`,
+      },
+      position: { x: 300, y: 0 },
+    }),
+    stepNode({
+      id: "internship-agent",
+      type: "agent",
+      title: "Complete internship application",
+      values: {
+        instruction: [
+          "Apply to exactly ONE internship: use only this direct listing URL:",
+          url,
+          "",
+          "Use only facts explicitly provided in the user's goal or attached documents. Check that the listing is still open and is the requested role. Fill the application accurately and submit it once only after checking every answer.",
+          "Do not invent answers, apply to other listings, or retry a submission whose result is unclear. Upload only a user-attached, allowlisted file when the approved form requires it; if that file is unavailable (including on Browserbase), report the blocker. Do not guess login credentials or bypass OTP/CAPTCHA. Stop without submitting for payment, unexpected consent, unrelated account changes, or missing facts.",
+        ].join("\n"),
+      },
+      position: { x: 600, y: 0 },
+    }),
+  ]
+
+  return {
+    nodes,
+    edges: [
+      edge("start-to-internship-approval", "start", "internship-approval"),
+      edge("internship-approval-to-agent", "internship-approval", "internship-agent"),
+    ],
+  }
+}
+
+export function buildInternshipQueueGraph(goal: string): WorkflowGraph {
+  const nodes: StepNodeType[] = [
+    stepNode({
+      id: "start",
+      type: "start",
+      title: "Start",
+      position: { x: 0, y: 0 },
+    }),
+    stepNode({
+      id: "internship-agent",
+      type: "agent",
+      title: "Discover and rank internships",
+      values: {
+        instruction: [
+          "Discover internship listings that match the user's profile and criteria:",
+          goal,
+          "",
+          "Visit real listing pages from multiple permitted sources. Collect up to 100 distinct, currently open internships with direct application URLs. Extract company, role, eligibility, deadline, and source URL when stated. Exclude duplicates and closed roles. Do NOT fill or submit any application during discovery; the next workflow step is the batch approval gate.",
+        ].join("\n"),
+      },
+      position: { x: 300, y: 0 },
+    }),
+    stepNode({
+      id: "internship-approval",
+      type: "approval",
+      title: "Approve application queue",
+      values: {
+        reason:
+          "Approve BrowserMind to process up to 100 ranked internship applications using only your attached documents and stated profile facts. It will skip blocked forms and never make a payment.",
+      },
+      position: { x: 600, y: 0 },
+    }),
+  ]
+
+  return {
+    nodes,
+    edges: [
+      edge("start-to-internship-agent", "start", "internship-agent"),
+      edge("internship-agent-to-approval", "internship-agent", "internship-approval"),
+    ],
+  }
+}
+
 // A short, human subject line derived from the goal's first line.
 function subjectFromGoal(goal: string): string {
   const [firstLine = ""] = goal.trim().split(/\r?\n/)
@@ -106,7 +244,27 @@ function subjectFromGoal(goal: string): string {
   return base ? `${base} — results` : "BrowserMind results"
 }
 
+const DESKTOP_INTENT =
+  /\b(desktop|this pc|my pc|my computer|my laptop|this machine|this computer|calculator|notepad|file explorer|installed app|open the app)\b/i
+
 export function buildDraftGraphFromGoal(goal: string): WorkflowGraph {
+  // Desktop Agent workflows must be Start + exactly one Desktop Agent node.
+  if (DESKTOP_INTENT.test(positiveText(goal))) {
+    return {
+      nodes: [
+        stepNode({ id: "start", type: "start", title: "Start", position: { x: 0, y: 0 } }),
+        stepNode({
+          id: "desktop",
+          type: "desktop-control",
+          title: "Desktop Agent",
+          values: { instruction: goal },
+          position: { x: 300, y: 0 },
+        }),
+      ],
+      edges: [edge("start-to-desktop", "start", "desktop")],
+    }
+  }
+
   const hints = intentHints(goal)
   const url = firstUrl(goal)
 
@@ -174,6 +332,18 @@ export function buildDraftGraphFromGoal(goal: string): WorkflowGraph {
       values: {
         instruction:
           "Extract the useful findings as structured text: the requested fields/table, sources with direct links, eligibility or fit notes, duplicates, risks, and recommended next steps.",
+      },
+    })
+  }
+
+  if (hints.involvesSensitive) {
+    append({
+      id: "human-approval",
+      type: "approval",
+      title: "Human approval",
+      values: {
+        reason:
+          "A sensitive action (payment, registration, or fee) was detected. Approve before BrowserMind proceeds with it.",
       },
     })
   }

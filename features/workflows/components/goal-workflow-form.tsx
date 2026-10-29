@@ -1,7 +1,7 @@
 "use client"
 
 import { FormEvent, useState, useTransition } from "react"
-import { SparklesIcon } from "lucide-react"
+import { Loader2, SparklesIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -37,10 +37,10 @@ export function GoalWorkflowForm() {
   const remaining = MAX_GOAL_LENGTH - goal.length
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-2xl">
-      <FieldGroup>
+    <form onSubmit={handleSubmit} className="w-full">
+      <FieldGroup className="gap-3">
         <Field>
-          <FieldLabel htmlFor="workflow-goal">
+          <FieldLabel htmlFor="workflow-goal" className="sr-only">
             What should BrowserMind do?
           </FieldLabel>
           <Textarea
@@ -48,19 +48,24 @@ export function GoalWorkflowForm() {
             value={goal}
             onChange={(event) => setGoal(event.target.value)}
             maxLength={MAX_GOAL_LENGTH}
-            placeholder="Find suitable software engineering opportunities this week."
-            className="min-h-28 max-h-[45vh] resize-y overflow-y-auto"
+            placeholder="Describe a task, for example: find suitable internships, compare the requirements, and summarize the application links."
+            className="max-h-[45vh] min-h-24 resize-y overflow-y-auto border-border bg-background text-sm leading-relaxed placeholder:text-muted-foreground/80 md:min-h-28"
             disabled={isPending}
           />
-          <FieldDescription>{remaining} characters left</FieldDescription>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <FieldDescription>
+              Include the website, information to use, and the result you want.
+            </FieldDescription>
+            <FieldDescription>{remaining} characters left</FieldDescription>
+          </div>
         </Field>
         <Button
           type="submit"
           className="self-start"
           disabled={isPending || goal.trim().length === 0}
         >
-          <SparklesIcon />
-          Create from goal
+          {isPending ? <Loader2 className="animate-spin" /> : <SparklesIcon />}
+          {isPending ? "Planning workflow…" : "Create workflow"}
         </Button>
       </FieldGroup>
     </form>

@@ -79,6 +79,7 @@ export function Canvas({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onDelete={onDelete}
+        deleteKeyCode={["Backspace", "Delete"]}
         colorMode={colorMode}
         fitView
         connectionLineType={ConnectionLineType.SmoothStep}

@@ -1,0 +1,4 @@
+fastapi>=0.115,<1
+Pillow>=10,<13
+pyautogui>=0.9.54,<1
+uvicorn>=0.34,<1

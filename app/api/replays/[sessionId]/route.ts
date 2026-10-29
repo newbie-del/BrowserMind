@@ -33,12 +33,26 @@ export async function GET(
   // Session replay is a Pro feature. Gate it here, not just in the UI, so a
   // non-pro org can't pull a recording by calling the route directly. `has`
   // evaluates the active org, which we've confirmed exists above.
-  if (!has({ plan: "pro" })) {
+  if (!has({ plan: "org:pro" })) {
     Sentry.logger.warn("Session replay denied — Pro plan required", {
       orgId,
       sessionId,
     })
     return new Response("Pro plan required", { status: 403 })
+  }
+
+  let session
+  try {
+    session = await browserbase.sessions.retrieve(sessionId)
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      return new Response("Recording not found", { status: 404 })
+    }
+    throw error
+  }
+
+  if (session.userMetadata?.orgId !== orgId) {
+    return new Response("Recording not found", { status: 404 })
   }
 
   try {

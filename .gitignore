@@ -22,6 +22,7 @@ out/
 
 # ---- Python / Browser-Use engine ----
 **/.venv/
+/.desktop-agent/
 **/__pycache__/
 *.pyc
 **/*.pyc
@@ -33,9 +34,13 @@ out/
 # ---- Read-only reference repos (kept on disk, not part of BrowserMind) ----
 browser-os/
 reference/
+OpenJarvis/
 
 # ---- Debug artifacts ----
 error/
+pxpipe-export-*/
+BrowserMind-Final-PPT.pptx
+docs/
 
 # ---- Misc ----
 .DS_Store

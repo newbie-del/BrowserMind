@@ -1,7 +1,17 @@
 "use client"
 
-import { createContext, useContext, useMemo } from "react"
-import { useRealtimeRunsWithTag } from "@trigger.dev/react-hooks"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
+import {
+  useRealtimeRun,
+  useRealtimeRunsWithTag,
+} from "@trigger.dev/react-hooks"
 
 import type { RunStep, runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 
@@ -12,6 +22,7 @@ type WorkflowRun = ReturnType<
 interface WorkflowRunsContextValue {
   runs: WorkflowRun[]
   error?: Error
+  refreshRuns: () => void
 }
 
 const WorkflowRunsContext = createContext<WorkflowRunsContextValue | null>(null)
@@ -32,21 +43,116 @@ export function WorkflowRunsProvider({
   accessToken,
   children,
 }: WorkflowRunsProviderProps) {
-  const { runs, error } = useRealtimeRunsWithTag<typeof runWorkflowTask>(
-    `workflow:${workflowId}`,
-    { accessToken }
+  const [subscriptionVersion, setSubscriptionVersion] = useState(0)
+  const [runs, setRuns] = useState<WorkflowRun[]>([])
+  const [error, setError] = useState<Error>()
+  const refreshRuns = useCallback(
+    () => setSubscriptionVersion((version) => version + 1),
+    []
+  )
+  const receiveRuns = useCallback((nextRuns: WorkflowRun[]) => {
+    setRuns((currentRuns) =>
+      JSON.stringify(currentRuns) === JSON.stringify(nextRuns)
+        ? currentRuns
+        : nextRuns
+    )
+  }, [])
+  const receiveError = useCallback((nextError?: Error) => {
+    setError(nextError)
+  }, [])
+
+  // Self-heal a frozen realtime stream. A long run can drop the live connection,
+  // leaving the UI stuck on "executing" after the run actually finished. When the
+  // tab becomes visible again (e.g. after switching to the inbox to read the
+  // results email) or the network reconnects, re-subscribe so it re-fetches the
+  // current — now completed — run state.
+  useEffect(() => {
+    const resubscribe = () => {
+      if (document.visibilityState === "visible") {
+        setSubscriptionVersion((version) => version + 1)
+      }
+    }
+    document.addEventListener("visibilitychange", resubscribe)
+    window.addEventListener("online", resubscribe)
+    return () => {
+      document.removeEventListener("visibilitychange", resubscribe)
+      window.removeEventListener("online", resubscribe)
+    }
+  }, [])
+
+  const newestLiveRun = useMemo(
+    () =>
+      runs
+        .filter(isRunLive)
+        .reduce<WorkflowRun | undefined>(
+          (newest, run) =>
+            !newest || run.createdAt > newest.createdAt ? run : newest,
+          undefined
+        ),
+    [runs]
+  )
+  const { run: liveRun } = useRealtimeRun<typeof runWorkflowTask>(
+    newestLiveRun?.id,
+    { accessToken, enabled: Boolean(newestLiveRun) }
+  )
+  const currentRuns = useMemo(
+    () =>
+      liveRun
+        ? runs.map((run) => (run.id === liveRun.id ? liveRun : run))
+        : runs,
+    [liveRun, runs]
   )
 
   const value = useMemo<WorkflowRunsContextValue>(
-    () => ({ runs, error }),
-    [runs, error]
+    () => ({
+      runs: currentRuns,
+      error,
+      refreshRuns,
+    }),
+    [currentRuns, error, refreshRuns]
   )
 
   return (
     <WorkflowRunsContext.Provider value={value}>
+      <RunsSubscription
+        key={`${workflowId}:${subscriptionVersion}`}
+        tag={`workflow:${workflowId}`}
+        accessToken={accessToken}
+        onRuns={receiveRuns}
+        onError={receiveError}
+      />
       {children}
     </WorkflowRunsContext.Provider>
   )
+}
+
+function RunsSubscription({
+  tag,
+  accessToken,
+  onRuns,
+  onError,
+}: {
+  tag: string
+  accessToken: string
+  onRuns: (runs: WorkflowRun[]) => void
+  onError: (error?: Error) => void
+}) {
+  const { runs, error } = useRealtimeRunsWithTag<typeof runWorkflowTask>(tag, {
+    accessToken,
+  })
+
+  useEffect(() => onRuns(runs), [onRuns, runs])
+  useEffect(() => onError(error), [error, onError])
+
+  return null
+}
+
+export function useRefreshWorkflowRuns() {
+  return useWorkflowRuns().refreshRuns
+}
+
+export function useWorkflowRunsError() {
+  return useWorkflowRuns().error
 }
 
 function useWorkflowRuns() {
@@ -61,7 +167,21 @@ function useWorkflowRuns() {
 
 // A run is still producing steps while it's queued or executing.
 function isRunLive(run: WorkflowRun): boolean {
-  return run.status === "QUEUED" || run.status === "EXECUTING"
+  return (
+    !run.finishedAt &&
+    [
+      "DELAYED",
+      "DEQUEUED",
+      "EXECUTING",
+      "FROZEN",
+      "PENDING",
+      "PENDING_VERSION",
+      "QUEUED",
+      "REATTEMPTING",
+      "WAITING",
+      "WAITING_FOR_DEPLOY",
+    ].includes(run.status)
+  )
 }
 
 // The steps of a run, wherever they live. Prefer the run's final output steps
@@ -107,7 +227,18 @@ export function useLiveRun(): WorkflowRun | undefined {
 // the session close, so the live metadata never has it — so an in-flight or
 // failed run reports undefined.
 function sessionIdForRun(run: WorkflowRun): string | undefined {
-  return run.output?.browserbaseSessionId
+  return (
+    run.output?.browserbaseSessionId ??
+    (run.metadata?.browserbaseSessionId as string | undefined)
+  )
+}
+
+export type ApprovalMetadata = {
+  status: "pending" | "approved" | "rejected" | "timed-out"
+  tokenId?: string
+  reason?: string | null
+  requestedAt?: string
+  decidedAt?: string
 }
 
 // One run flattened for the console: its identity and status, whether it's still
@@ -121,6 +252,13 @@ export interface ConsoleRun {
   // The Browserbase session id to replay, present only once the run has finished.
   browserbaseSessionId?: string
   liveViewUrl?: string
+  approval?: ApprovalMetadata
+  email?: {
+    status: "sent" | "failed" | "not-configured" | "skipped"
+    to?: string
+    error?: string
+    reason?: string
+  }
 }
 
 // Every run, newest first, with its steps resolved — the full history a console
@@ -140,6 +278,8 @@ export function useConsoleRuns(): ConsoleRun[] {
           steps: stepsForRun(run),
           browserbaseSessionId: sessionIdForRun(run),
           liveViewUrl: run.metadata?.liveViewUrl as string | undefined,
+          approval: run.metadata?.approval as ApprovalMetadata | undefined,
+          email: run.output?.email,
         })),
     [runs]
   )

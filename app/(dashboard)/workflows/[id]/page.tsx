@@ -4,7 +4,10 @@ import { notFound } from "next/navigation"
 import { ReactFlowProvider } from "@xyflow/react"
 
 import { liveblocks } from "@/lib/liveblocks"
-import { getWorkflow } from "@/features/workflows/data"
+import {
+  getWorkflow,
+  listWorkflowAttachments,
+} from "@/features/workflows/data"
 import { Room } from "@/features/workflows/components/room"
 import { WorkflowShell } from "@/features/workflows/components/workflow-shell"
 import { WorkflowRunsProvider } from "@/features/workflows/components/workflow-runs-provider"
@@ -20,6 +23,7 @@ export default async function Page({
 
   const workflow = await getWorkflow(orgId, id)
   if (!workflow) notFound()
+  const attachments = await listWorkflowAttachments(orgId, id)
 
   // Rooms are private by default under ID-token auth. Grant write access to the
   // owning org, matching the `groupIds: [orgId]` issued by the auth endpoint.
@@ -51,7 +55,11 @@ export default async function Page({
     <Room roomId={id}>
       <ReactFlowProvider>
         <WorkflowRunsProvider workflowId={id} accessToken={runsToken}>
-          <WorkflowShell workflowId={id} workflow={workflow} />
+          <WorkflowShell
+            workflowId={id}
+            workflow={workflow}
+            attachments={attachments}
+          />
         </WorkflowRunsProvider>
       </ReactFlowProvider>
     </Room>

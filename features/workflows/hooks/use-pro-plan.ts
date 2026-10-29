@@ -2,9 +2,8 @@ import { useCallback } from "react"
 import { useAuth } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 
-// Slug of the organization "Pro" plan configured in Clerk Billing. Kept here so
-// every gate reads from one place — change it if the plan is renamed.
-const PRO_PLAN = "pro"
+// Clerk prefixes organization plan checks with "org:".
+const PRO_PLAN = "org:pro"
 
 // Where the pricing table lives inside the dashboard layout.
 const BILLING_PATH = "/billing"

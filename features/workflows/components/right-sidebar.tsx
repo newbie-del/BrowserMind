@@ -2,7 +2,15 @@
 
 import { useState, useTransition } from "react"
 import { useReactFlow, useStore } from "@xyflow/react"
-import { Lock, MoreHorizontal, Play, Square, Trash2 } from "lucide-react"
+import {
+  Lock,
+  MoreHorizontal,
+  Play,
+  Plus,
+  Search,
+  Square,
+  Trash2,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -21,17 +29,23 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ResizablePanel } from "@/components/ui/resizable"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 
 import {
   cancelWorkflowRunAction,
   deleteWorkflowAction,
+  renameWorkflowAction,
   runWorkflowAction,
 } from "@/features/workflows/actions"
 import { NodeIcon } from "@/features/workflows/components/node-icon"
-import { useLiveRun } from "@/features/workflows/components/workflow-runs-provider"
+import { WorkflowAttachments } from "@/features/workflows/components/workflow-attachments"
+import {
+  useConsoleRuns,
+  useLiveRun,
+  useRefreshWorkflowRuns,
+} from "@/features/workflows/components/workflow-runs-provider"
+import { Spinner } from "@/components/ui/spinner"
 import { useProPlan } from "@/features/workflows/hooks/use-pro-plan"
 import { useUpstreamConnections } from "@/features/workflows/hooks/use-upstream-connections"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
@@ -43,7 +57,11 @@ import {
   type StepNodeKind,
   type StepNodeType,
 } from "@/features/workflows/nodes/node-registry"
-import type { Workflow, WorkflowGenerationStatus } from "@/lib/db/schema"
+import type {
+  Workflow,
+  WorkflowAttachment,
+  WorkflowGenerationStatus,
+} from "@/lib/db/schema"
 
 // This file builds up to the RightSidebar component exported at the bottom: a
 // header with workflow actions (delete, run), then two tabs — a Toolbar for
@@ -219,6 +237,7 @@ const premiumNodes = new Set<NodeType>(["agent"])
 
 // The Toolbar tab: a button per node type that adds it to the canvas.
 function Palette() {
+  const [query, setQuery] = useState("")
   // The shared React Flow store (lifted to a provider above the canvas and this
   // sidebar) lets us read the current nodes/viewport and add to them from here.
   const { getNodes, getViewport, addNodes } = useReactFlow<StepNodeType>()
@@ -245,7 +264,10 @@ function Palette() {
     const nodes = getNodes()
 
     // Only one trigger is allowed — a workflow has a single entry point.
-    if (def.kind === "trigger" && nodes.some((n) => n.data.kind === "trigger")) {
+    if (
+      def.kind === "trigger" &&
+      nodes.some((n) => n.data.kind === "trigger")
+    ) {
       toast.error("A workflow can only have one trigger.")
       return
     }
@@ -272,26 +294,50 @@ function Palette() {
     })
   }
 
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const matchingDefinitions = definitions.filter((definition) =>
+    definition.label.toLocaleLowerCase().includes(normalizedQuery)
+  )
+
   return (
-    <Section title="Toolbar">
+    <Section title="Add steps" icon={<Plus className="size-3.5" />}>
+      <div className="flex flex-col gap-2 px-3 pt-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search steps"
+            aria-label="Search workflow steps"
+            className="pl-8 text-xs"
+          />
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          Select a step to add it to the canvas.
+        </p>
+      </div>
       <Accordion
         type="multiple"
         defaultValue={sections.map((s) => s.kind)}
         className="px-3 py-2"
       >
-        {sections.map((section) => (
-          <AccordionItem
-            key={section.kind}
-            value={section.kind}
-            className="not-last:border-b-0"
-          >
-            <AccordionTrigger className="py-2 text-xs font-medium text-muted-foreground hover:no-underline">
-              {section.label}
-            </AccordionTrigger>
-            <AccordionContent className="flex flex-col gap-0.5">
-              {definitions
-                .filter((def) => def.kind === section.kind)
-                .map((def) => {
+        {sections.map((section) => {
+          const sectionDefinitions = matchingDefinitions.filter(
+            (definition) => definition.kind === section.kind
+          )
+          if (sectionDefinitions.length === 0) return null
+
+          return (
+            <AccordionItem
+              key={section.kind}
+              value={section.kind}
+              className="not-last:border-b-0"
+            >
+              <AccordionTrigger className="py-2 text-xs font-medium text-muted-foreground hover:no-underline">
+                {section.label}
+              </AccordionTrigger>
+              <AccordionContent className="flex flex-col gap-0.5">
+                {sectionDefinitions.map((def) => {
                   const type = def.type as NodeType
                   const locked = isLocked(type)
                   return (
@@ -299,8 +345,10 @@ function Palette() {
                       key={def.type}
                       variant="ghost"
                       onClick={() => add(type)}
-                      title={locked ? "Upgrade to Pro to add this node" : undefined}
-                      className="justify-start gap-2.5 px-1.5 text-xs"
+                      title={
+                        locked ? "Upgrade to Pro to add this node" : undefined
+                      }
+                      className="h-9 justify-start gap-2.5 rounded-lg px-2 text-xs"
                     >
                       <NodeIcon type={type} />
                       {def.label}
@@ -310,9 +358,15 @@ function Palette() {
                     </Button>
                   )
                 })}
-            </AccordionContent>
-          </AccordionItem>
-        ))}
+              </AccordionContent>
+            </AccordionItem>
+          )
+        })}
+        {matchingDefinitions.length === 0 && (
+          <p className="px-1 py-3 text-xs text-muted-foreground">
+            No steps match that search.
+          </p>
+        )}
       </Accordion>
     </Section>
   )
@@ -334,20 +388,79 @@ const generationStatusLabels: Record<WorkflowGenerationStatus, string> = {
   failed: "Plan failed",
 }
 
+function WorkflowNameEditor({
+  workflowId,
+  initialName,
+}: {
+  workflowId: string
+  initialName: string
+}) {
+  const [name, setName] = useState(initialName)
+  const [isPending, startTransition] = useTransition()
+
+  const save = () => {
+    const trimmed = name.trim()
+    if (!trimmed || trimmed === initialName) {
+      setName(initialName)
+      return
+    }
+    startTransition(async () => {
+      try {
+        await renameWorkflowAction(workflowId, trimmed)
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Couldn't rename the workflow."
+        )
+        setName(initialName)
+      }
+    })
+  }
+
+  return (
+    <div className="border-b border-border px-3 py-2.5">
+      <Label
+        htmlFor="workflow-name"
+        className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
+      >
+        Workflow name
+      </Label>
+      <Input
+        id="workflow-name"
+        value={name}
+        disabled={isPending}
+        maxLength={120}
+        onChange={(event) => setName(event.target.value)}
+        onBlur={save}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault()
+            event.currentTarget.blur()
+          }
+        }}
+        className="mt-1 h-8 text-sm"
+      />
+    </div>
+  )
+}
+
 function GoalSummary({ workflow }: { workflow: WorkflowMetadata }) {
   if (!workflow.goalText) {
     return null
   }
 
   return (
-    <div className="border-b border-border px-3 py-2">
+    <div className="border-b border-border px-3 py-3">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground">Goal</p>
+        <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+          Workflow goal
+        </p>
         <Badge variant="secondary">
           {generationStatusLabels[workflow.generationStatus]}
         </Badge>
       </div>
-      <p className="line-clamp-3 text-sm leading-snug">{workflow.goalText}</p>
+      <p className="line-clamp-3 text-xs leading-relaxed">
+        {workflow.goalText}
+      </p>
     </div>
   )
 }
@@ -392,28 +505,39 @@ function ActionsMenu({ workflowId }: { workflowId: string }) {
 function RunButton({ workflowId }: { workflowId: string }) {
   const { getNodes, getEdges } = useReactFlow<StepNodeType>()
   const [isPending, startTransition] = useTransition()
+  const [stoppingRunId, setStoppingRunId] = useState<string | null>(null)
+  const [startingRunId, setStartingRunId] = useState<string | null>(null)
+  const refreshRuns = useRefreshWorkflowRuns()
+  const runs = useConsoleRuns()
+  const isAwaitingRun =
+    startingRunId !== null && !runs.some((run) => run.id === startingRunId)
+
   // The run in flight, if any. At most one is live at a time, so its presence
   // decides which mode the button is in.
   const liveRun = useLiveRun()
 
   if (liveRun) {
+    const isStopping = stoppingRunId === liveRun.id
     return (
       <Button
         size="sm"
         variant="destructive"
-        disabled={isPending}
+        disabled={isPending || isStopping}
         onClick={() => {
+          setStoppingRunId(liveRun.id)
           startTransition(async () => {
             try {
               await cancelWorkflowRunAction(liveRun.id)
+              refreshRuns()
             } catch {
+              setStoppingRunId(null)
               toast.error("Couldn't stop the run.")
             }
           })
         }}
       >
         <Square fill="currentColor" />
-        Stop
+        {isStopping ? "Stopping…" : "Stop"}
       </Button>
     )
   }
@@ -422,8 +546,8 @@ function RunButton({ workflowId }: { workflowId: string }) {
     <Button
       size="sm"
       variant="secondary"
-      disabled={isPending}
       onClick={() => {
+        setStoppingRunId(null)
         const graph = { nodes: getNodes(), edges: getEdges() }
         const problems = validateGraph(graph)
         if (problems.length > 0) {
@@ -432,12 +556,27 @@ function RunButton({ workflowId }: { workflowId: string }) {
         }
 
         startTransition(async () => {
-          await runWorkflowAction({ id: workflowId, graph })
+          try {
+            const handle = await runWorkflowAction({ id: workflowId, graph })
+            setStartingRunId(handle.id)
+            refreshRuns()
+          } catch (error) {
+            toast.error(
+              error instanceof Error
+                ? error.message
+                : "Couldn't start the workflow."
+            )
+          }
         })
       }}
+      disabled={isPending || isAwaitingRun}
     >
-      <Play fill="primary" />
-      Run
+      {isPending || isAwaitingRun ? (
+        <Spinner className="size-4" />
+      ) : (
+        <Play fill="primary" />
+      )}
+      {isPending || isAwaitingRun ? "Starting…" : "Run"}
     </Button>
   )
 }
@@ -449,14 +588,20 @@ function RunButton({ workflowId }: { workflowId: string }) {
 export function RightSidebar({
   workflowId,
   workflow,
+  attachments,
 }: {
   workflowId: string
   workflow: WorkflowMetadata
+  attachments: Pick<
+    WorkflowAttachment,
+    "id" | "filename" | "contentType" | "size"
+  >[]
 }) {
   const [tab, setTab] = useState("toolbar")
 
   // TODO: read the currently selected node from React Flow.
-  const selected = useStore((s) => s.nodes.find((n) => n.selected)) as StepNodeType | undefined
+  const selected = useStore((s) => s.nodes.find((n) => n.selected)) as
+    StepNodeType | undefined
 
   // TODO: auto-switch to the Editor tab when the selection changes.
   const [prevSelectedId, setPrevSelectedId] = useState(selected?.id)
@@ -466,40 +611,59 @@ export function RightSidebar({
   }
 
   return (
-    <ResizablePanel
-      className="bg-background"
-      defaultSize="16rem"
-      minSize="14rem"
-      maxSize="36rem"
-      groupResizeBehavior="preserve-pixel-size"
-    >
-      <Tabs value={tab} onValueChange={setTab} className="size-full gap-0">
-        <div className="flex items-center justify-between border-b border-border p-2">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-y-contain bg-background">
+      <Tabs
+        value={tab}
+        onValueChange={setTab}
+        className="flex min-h-full flex-col gap-0"
+      >
+        <div className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-border bg-background/95 px-3 py-2 backdrop-blur">
+          <div>
+            <p className="text-xs font-semibold">Workflow settings</p>
+            <p className="text-[11px] text-muted-foreground">
+              Steps, files, and run controls
+            </p>
+          </div>
           <ActionsMenu workflowId={workflowId} />
           <RunButton workflowId={workflowId} />
         </div>
+        <WorkflowNameEditor
+          key={workflow.name}
+          workflowId={workflowId}
+          initialName={workflow.name}
+        />
         <GoalSummary workflow={workflow} />
-        <TabsList className="m-2 w-fit bg-background">
+        <WorkflowAttachments
+          workflowId={workflowId}
+          initialAttachments={attachments}
+        />
+        <TabsList className="sticky top-12 z-10 mx-3 my-2 w-fit shrink-0 bg-muted/90 backdrop-blur">
           <TabsTrigger
             value="toolbar"
             className="flex-none rounded-sm data-active:bg-accent! data-active:text-accent-foreground! data-active:shadow-none! dark:data-active:border-transparent!"
           >
-            Toolbar
+            Add steps
           </TabsTrigger>
           <TabsTrigger
             value="editor"
             className="flex-none rounded-sm data-active:bg-accent! data-active:text-accent-foreground! data-active:shadow-none! dark:data-active:border-transparent!"
           >
-            Editor
+            Properties
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="toolbar" className="flex min-h-0 flex-col">
+        <TabsContent
+          value="toolbar"
+          className="flex min-h-80 flex-1 shrink-0 flex-col overflow-hidden"
+        >
           <Palette />
         </TabsContent>
-        <TabsContent value="editor" className="flex min-h-0 flex-col">
+        <TabsContent
+          value="editor"
+          className="flex min-h-80 flex-1 shrink-0 flex-col overflow-hidden"
+        >
           <Inspector key={selected?.id} node={selected} />
         </TabsContent>
       </Tabs>
-    </ResizablePanel>
+    </div>
   )
 }

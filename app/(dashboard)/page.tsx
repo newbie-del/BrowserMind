@@ -1,32 +1,14 @@
-import { WorkflowIcon } from "lucide-react"
+import { auth } from "@clerk/nextjs/server"
+import { notFound } from "next/navigation"
 
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
-import { GoalWorkflowForm } from "@/features/workflows/components/goal-workflow-form"
-import { NewWorkflowButton } from "@/features/workflows/components/new-workflow-button"
+import { WorkflowDashboard } from "@/features/workflows/components/workflow-dashboard"
+import { listWorkflows } from "@/features/workflows/data"
 
-export default function Page() {
-  return (
-    <Empty className="h-full min-h-0 justify-start overflow-y-auto border-none py-8">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <WorkflowIcon />
-        </EmptyMedia>
-        <EmptyTitle>No workflow selected</EmptyTitle>
-        <EmptyDescription>
-          Select a workflow from the sidebar or create a new one to get started.
-        </EmptyDescription>
-      </EmptyHeader>
-      <EmptyContent>
-        <GoalWorkflowForm />
-        <NewWorkflowButton />
-      </EmptyContent>
-    </Empty>
-  )
+export default async function Page() {
+  const { orgId } = await auth()
+  if (!orgId) notFound()
+
+  const workflows = await listWorkflows(orgId)
+
+  return <WorkflowDashboard workflows={workflows} />
 }

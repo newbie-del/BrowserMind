@@ -5,9 +5,9 @@
 
 <h1>Browser Automation SaaS</h1>
 
-<p><strong>Design in real time. Execute in cloud browsers. Replay every run.</strong></p>
+<p><strong>Design in real time. Automate with a local browser, or opt into cloud sessions and replay.</strong></p>
 
-<p>A collaborative visual workflow builder powered by Stagehand, Browserbase, Trigger.dev, and Liveblocks.</p>
+<p>A collaborative visual workflow builder powered by Browser-Use, Trigger.dev, and Liveblocks.</p>
 
 <p>
   <a href="#features">Features</a>&nbsp;&nbsp;&bull;&nbsp;&nbsp;
@@ -147,6 +147,47 @@ git checkout chapter-16-browserbase-setup  # example: jump to Browserbase setup
 
 ---
 
+## Internship application demo
+
+For one known listing, create a goal containing its direct URL. For discovery,
+ask for a number of internships (up to 100), specify role/location/eligibility,
+and provide accurate profile facts. Attach a resume or other application
+documents in the workflow before starting. Discovery visits listings and returns
+direct URLs; BrowserMind deduplicates and ranks them with a deterministic
+keyword-overlap score. One approval gate appears after discovery and before any
+application is opened or submitted. The queue is processed sequentially and
+each listing's status, attempt count, and last error are persisted with the
+workflow.
+
+BrowserMind uses OpenAI for workflow planning, Browser-Use execution, attachment
+extraction, and shortlist verification. Configure `OPENAI_API_KEY`; no Gemini,
+OpenRouter, UnoRouter, Groq, or Browser-Use hosted-provider fallback is used.
+
+An application is submitted only after approval, when the listing is still
+appropriate and all answers are supported by the goal or attached documents.
+Local-browser runs can read and upload allowlisted PDF/JPG/PNG attachments (up
+to 20 MB total) when required. Browserbase runs cannot transfer those local
+files, so a required upload is a blocker there. A run also stops that listing
+for missing facts, an unprovided login, OTP/CAPTCHA, payment, unexpected
+consent, or an ambiguous submission result; it records the blocker and
+continues with the next queue item. OTP/CAPTCHA are never bypassed and payments
+are never made. A previously interrupted `processing` entry becomes
+`uncertain` and is never automatically resubmitted.
+
+Login is not automated from stored passwords. If a site requires an existing
+session, the user must authenticate manually in the local Browser-Use profile
+for that workflow before running it. Set `BROWSER_USE_PROFILE_DIR` to a
+protected local directory to enable workflow-specific persistent profiles.
+Browserbase sessions do not use this local profile. Do not use a shared profile
+directory on a multi-user worker.
+
+The queue supports a maximum of 100 distinct listings per run (default 50), not
+a guarantee that every search source will return 50. Ranking is a heuristic, not a fit or eligibility
+guarantee; review the discovered queue and application answers at the approval
+gate. Apply database migrations before running the queue feature.
+
+---
+
 ## Getting Started
 
 ### Prerequisites
@@ -156,8 +197,9 @@ git checkout chapter-16-browserbase-setup  # example: jump to Browserbase setup
 - PostgreSQL database, such as [Neon](https://cwa.run/neon)
 - [Trigger.dev](https://cwa.run/trigger) project
 - [Liveblocks](https://cwa.run/liveblocks) project
-- [Browserbase](https://cwa.run/browserbase) account
+- Python and a configured Browser-Use virtual environment (or set `BROWSER_USE_PYTHON`)
 - [Resend](https://resend.com/) account
+- Optional [Browserbase](https://cwa.run/browserbase) account for paid cloud sessions and replay
 - Optional [Sentry](https://cwa.run/sentry) project for error monitoring and source maps
 
 ### 1. Clone and install
@@ -194,7 +236,9 @@ TRIGGER_SECRET_KEY=
 NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY=
 LIVEBLOCKS_SECRET_KEY=
 
+BROWSER_USE_BROWSERBASE=false
 BROWSERBASE_API_KEY=
+OPENAI_API_KEY=
 RESEND_API_KEY=
 
 NEXT_PUBLIC_SENTRY_DSN=
@@ -227,9 +271,9 @@ npm run db:push
 
 ### 5. Configure integrations
 
-Create projects in Trigger.dev and Liveblocks, then add their keys to `.env.local`. Add your Browserbase API key for Stagehand execution and session replay, and a Resend API key for the Send Email node.
+Create projects in Trigger.dev and Liveblocks, then add their keys to `.env.local`. Browser-Use runs a local browser by default, so Browserbase credentials are not required and no Browserbase minutes are consumed. Set `BROWSER_USE_SOURCE_PATH` to your Browser-Use checkout if it is not at `..\browser-use`, and set `BROWSER_USE_PYTHON` to its virtual-environment Python executable if needed.
 
-The Stagehand model runs through Browserbase Model Gateway, so no separate model-provider API key is required.
+OpenAI is the default model provider for browser runs and attached-document reading. Configure `OPENAI_API_KEY` in the environment file used by the Trigger worker. Workflow planning can use Google when configured, otherwise it uses the built-in deterministic planner. To opt into paid Browserbase sessions and replay, set `BROWSER_USE_BROWSERBASE=true` and configure `BROWSERBASE_API_KEY`. Add a Resend API key for the Send Email node.
 
 ### 6. Run Trigger.dev
 
@@ -333,19 +377,20 @@ flowchart LR
     A[React Flow canvas] -->|sync| B[Liveblocks room]
     A -->|validate and save| C[(Neon Postgres)]
     C --> D[Trigger.dev task]
-    D --> E[Stagehand]
-    E --> F[Browserbase session]
+    D --> E[Browser-Use agent]
+    E -->|default| F[Local browser]
+    E -->|optional paid mode| H[Browserbase session]
     D -->|step metadata| G[Live run console]
-    F -->|recording| H[Session replay]
+    H -->|recording| I[Session replay]
 ```
 
 1. **Design** - Liveblocks synchronizes nodes, edges, cursors, and presence on the React Flow canvas.
 2. **Validate** - Running a workflow validates the graph and saves its current snapshot to Postgres.
 3. **Schedule** - Trigger.dev topologically sorts connected nodes and executes them in dependency order.
-4. **Automate** - Browser nodes share one Browserbase-backed Stagehand session for the entire run.
+4. **Automate** - Browser-Use runs locally by default; explicitly enabling Browserbase uses a hosted browser session instead.
 5. **Connect** - Node outputs are stored by node ID and interpolated into downstream inputs.
 6. **Observe** - Trigger.dev streams step status, timing, outputs, and errors back to the console.
-7. **Replay** - Completed browser runs expose their recording through a server-side replay proxy.
+7. **Replay** - Completed Browserbase runs expose their recording through a server-side replay proxy; local runs have no hosted recording.
 
 <br />
 

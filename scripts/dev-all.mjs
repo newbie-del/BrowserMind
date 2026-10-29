@@ -22,7 +22,10 @@ const services = [
     color: "\x1b[35m",
     // --env-file points at the repo-root .env, BrowserMind's single source of
     // secrets (the worker runs from the repo root, so it is a sibling).
-    cmd: "npx trigger.dev@latest dev --env-file .env",
+    // Pinned to the SDK's version (4.6.3) and -y so npx never stalls on an
+    // "Ok to proceed?" install prompt — an unpinned @latest hangs the worker
+    // (and then every run just sits in QUEUED, never executing).
+    cmd: "npx -y trigger.dev@4.6.3 dev --env-file .env",
   },
 ]
 

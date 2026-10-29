@@ -34,6 +34,7 @@
   ],
   "exclude": [
     "node_modules",
+    "OpenJarvis",
     "browser-use",
     "browser-os",
     "reference",

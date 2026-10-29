@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:all": "node scripts/dev-all.mjs",
-    "dev:trigger": "npx trigger.dev@latest dev --env-file .env",
+    "dev:trigger": "npx -y trigger.dev@4.6.3 dev --env-file .env",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

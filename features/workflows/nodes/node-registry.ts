@@ -4,9 +4,11 @@ import {
   Eye,
   Globe,
   Mail,
+  Monitor,
   MousePointerClick,
   Pointer,
   ScanText,
+  ShieldCheck,
   type LucideIcon,
 } from "lucide-react"
 
@@ -140,6 +142,46 @@ export const nodeRegistry = {
       { path: "success", label: "Success" },
       { path: "message", label: "Message" },
       { path: "completed", label: "Completed" },
+    ],
+  },
+  "desktop-control": {
+    type: "desktop-control",
+    kind: "action",
+    label: "Desktop Agent",
+    icon: Monitor,
+    accent: "bg-orange-500 text-white",
+    fields: [
+      {
+        key: "instruction",
+        label: "Instruction",
+        placeholder: "Open Calculator and calculate 12 × 8",
+        multiline: true,
+        required: true,
+      },
+    ],
+    outputs: [
+      { path: "success", label: "Success" },
+      { path: "message", label: "Message" },
+      { path: "actions", label: "Approved actions" },
+    ],
+  },
+  approval: {
+    type: "approval",
+    kind: "action",
+    label: "Approval",
+    icon: ShieldCheck,
+    accent: "bg-yellow-500 text-white",
+    fields: [
+      {
+        key: "reason",
+        label: "What needs approval",
+        placeholder: "Pay the ₹500 registration fee",
+        multiline: true,
+      },
+    ],
+    outputs: [
+      { path: "approved", label: "Approved" },
+      { path: "reason", label: "Reason" },
     ],
   },
   "send-email": {

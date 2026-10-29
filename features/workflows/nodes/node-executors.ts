@@ -8,6 +8,7 @@ import type {
 import { act } from "./act"
 import { agent } from "./agent"
 import { extract } from "./extract"
+import { desktopControl } from "./desktop-control"
 import { observe } from "./observe"
 import { openUrl } from "./open-url"
 import { sendEmail } from "./send-email"
@@ -38,6 +39,15 @@ export const nodeExecutors: Partial<Record<NodeType, NodeExecutor>> = {
           task,
         }),
     }),
+  "desktop-control": async ({ values }) =>
+    desktopControl({ instruction: values.instruction }),
   "send-email": async ({ values }) =>
     sendEmail({ to: values.to, subject: values.subject, body: values.body }),
+  // Approval is enforced by the run task via a Trigger.dev waitpoint, not here;
+  // this entry only satisfies the executor map. The real pause/resume lives in
+  // run-workflow.ts.
+  approval: async ({ values }) => ({
+    status: "pending" as const,
+    reason: values.reason ?? "",
+  }),
 } satisfies Record<ActionNodeType, NodeExecutor>

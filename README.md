@@ -3,7 +3,7 @@
 <br />
 <br />
 
-<h1>Browser Automation SaaS</h1>
+<h1>BrowserMind</h1>
 
 <p><strong>Design in real time. Automate with a local browser, or opt into cloud sessions and replay.</strong></p>
 
@@ -15,7 +15,7 @@
   <a href="#getting-started">Quick start</a>&nbsp;&nbsp;&bull;&nbsp;&nbsp;
   <a href="#deploy-on-railway">Deploy</a>&nbsp;&nbsp;&bull;&nbsp;&nbsp;
   <a href="#how-it-works">Architecture</a>&nbsp;&nbsp;&bull;&nbsp;&nbsp;
-  <a href="#tutorial">Tutorial</a>
+
 </p>
 
 <br />
@@ -34,7 +34,7 @@
 
 <br />
 
-![Collaborative browser automation workflow canvas](./design/canvas-2.png)
+![Collaborative browser automation workflow canvas](./design/canvas-3.png)
 
 <p align="center"><sub>Build together on a live canvas, then follow every node from execution to output.</sub></p>
 
@@ -44,47 +44,6 @@
 
 ---
 
-## Tutorial
-
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=1hnyCQW-B4A"><img src="https://img.shields.io/badge/YouTube-Watch_the_full_tutorial-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch the full tutorial on YouTube" /></a>
-</p>
-
-Each chapter has a matching branch so you can check out the code at any point in the tutorial:
-
-| Branch | Chapter |
-|--------|---------|
-| `main` | Final project |
-| `chapter-02-agentic-coding-setup` | Agentic coding setup |
-| `chapter-03-auth-setup` | Clerk authentication setup |
-| `chapter-04-organizations-setup` | Clerk organizations setup |
-| `chapter-05-dashboard-layout` | Dashboard layout |
-| `chapter-06-database-setup` | Neon and Drizzle database setup |
-| `chapter-07-workflow-page` | Workflow page |
-| `chapter-08-trigger-dev-setup` | Trigger.dev setup |
-| `chapter-09-canvas-setup` | React Flow canvas setup |
-| `chapter-10-custom-nodes` | Custom workflow nodes |
-| `chapter-11-liveblocks-setup` | Liveblocks collaboration setup |
-| `chapter-12-liveblocks-auth` | Liveblocks authentication |
-| `chapter-13-names-and-avatars` | Collaborator names and avatars |
-| `chapter-14-workflow-toolbar` | Workflow toolbar |
-| `chapter-15-workflow-execution` | Workflow execution |
-| `chapter-16-browserbase-setup` | Browserbase and Stagehand setup |
-| `chapter-17-data-passthrough` | Data passthrough between nodes |
-| `chapter-18-live-run-status` | Live workflow run status |
-| `chapter-19-remaining-nodes` | Additional browser nodes |
-| `chapter-20-email-node` | Resend email node |
-| `chapter-21-console-panel` | Run console panel |
-| `chapter-22-session-replay` | Browserbase session replay |
-| `chapter-23-billing` | Clerk Billing and Pro features |
-| `chapter-24-sentry-setup` | Sentry monitoring setup |
-| `chapter-25-polish` | Final product polish |
-
-```bash
-git checkout chapter-16-browserbase-setup  # example: jump to Browserbase setup
-```
-
----
 
 ## Features
 
@@ -397,29 +356,135 @@ flowchart LR
 ## Project Structure
 
 ```text
-app/
-├── (auth)/                     # Clerk sign-in, sign-up, and organization selection
-├── (dashboard)/                # Workflow dashboard, editor, and billing page
-└── api/
-    ├── liveblocks/             # Liveblocks authentication and user resolution
-    └── replays/                # Browserbase recording proxy
-components/
-├── app-sidebar.tsx             # Organization and workflow navigation
-└── ui/                         # Shared UI primitives
-features/
-└── workflows/
-    ├── components/             # Canvas, toolbar, inspector, console, and replay UI
-    ├── hooks/                  # Billing plan and graph connection hooks
-    ├── lib/                    # Validation, interpolation, and workflow utilities
-    ├── nodes/                  # Node registry and executor implementations
-    ├── tasks/                  # Trigger.dev workflow runner
-    ├── actions.ts              # Workflow mutations, execution, and cancellation
-    └── data.ts                 # Organization-scoped workflow queries
-lib/
-├── db/                         # Drizzle schema, Neon client, and migrations
-├── browserbase.ts              # Browserbase SDK client
-├── liveblocks.ts               # Liveblocks server client
-└── resend.ts                   # Resend client
+BrowserMind/
+│
+├── app/                              # Next.js application routes
+│   ├── (auth)/
+│   │   ├── choose-organization/
+│   │   ├── sign-in/[[...sign-in]]/
+│   │   └── sign-up/[[...sign-up]]/
+│   │
+│   ├── (dashboard)/
+│   │   ├── page.tsx                  # Main dashboard
+│   │   ├── layout.tsx
+│   │   ├── billing/
+│   │   └── workflows/
+│   │       └── [id]/                  # Workflow editor
+│   │
+│   ├── api/
+│   │   ├── liveblocks/
+│   │   │   ├── auth/
+│   │   │   └── users/
+│   │   └── replays/
+│   │       └── [sessionId]/
+│   │
+│   ├── globals.css
+│   ├── layout.tsx
+│   └── global-error.tsx
+│
+├── components/                       # Shared React components
+│   ├── app-sidebar.tsx
+│   ├── theme-provider.tsx
+│   └── ui/                           # Reusable UI primitives
+│
+├── features/
+│   └── workflows/                    # Core BrowserMind workflow system
+│       ├── components/
+│       │   ├── canvas.tsx
+│       │   ├── workflow-shell.tsx
+│       │   ├── workflow-dashboard.tsx
+│       │   ├── workflow-nav.tsx
+│       │   ├── step-node.tsx
+│       │   ├── inspector-panel.tsx
+│       │   ├── right-sidebar.tsx
+│       │   ├── console-panel.tsx
+│       │   ├── logs-panel.tsx
+│       │   ├── workflow-attachments.tsx
+│       │   ├── session-replay.tsx
+│       │   └── workflow-runs-provider.tsx
+│       │
+│       ├── hooks/
+│       │   ├── use-pro-plan.ts
+│       │   └── use-upstream-connections.ts
+│       │
+│       ├── lib/
+│       │   ├── goal-planner.ts
+│       │   ├── plan-workflow.ts
+│       │   ├── validate-graph.ts
+│       │   ├── interpolate.ts
+│       │   ├── run-browser-use-agent.ts
+│       │   ├── run-desktop-agent.ts
+│       │   ├── extract-workflow-attachments.ts
+│       │   ├── internship-queue.ts
+│       │   ├── verify-shortlist.ts
+│       │   ├── workflow-memory.ts
+│       │   └── format-results-email.ts
+│       │
+│       ├── nodes/
+│       │   ├── node-registry.ts
+│       │   ├── node-executors.ts
+│       │   ├── open-url.ts
+│       │   ├── act.ts
+│       │   ├── observe.ts
+│       │   ├── extract.ts
+│       │   ├── agent.ts
+│       │   ├── desktop-control.ts
+│       │   └── send-email.ts
+│       │
+│       ├── tasks/
+│       │   └── run-workflow.ts        # Trigger.dev workflow execution
+│       │
+│       ├── actions.ts                 # Workflow mutations and controls
+│       └── data.ts                    # Organization-scoped data queries
+│
+├── lib/
+│   ├── db/
+│   │   ├── index.ts                   # Neon/Drizzle database client
+│   │   ├── schema.ts                  # Database schema
+│   │   └── migrations/
+│   │       ├── 0000_add_workflow_goal_metadata.sql
+│   │       ├── 0001_workflow_attachments.sql
+│   │       ├── 0002_workflow_surfaced_items.sql
+│   │       └── 0003_workflow_applications.sql
+│   │
+│   ├── browserbase.ts                 # Browserbase SDK client
+│   ├── liveblocks.ts                  # Liveblocks server client
+│   ├── resend.ts                      # Email client
+│   └── utils.ts
+│
+├── browser-use/                       # Browser-Use browser automation runtime
+│   ├── browser_use/
+│   ├── tests/
+│   ├── examples/
+│   └── pyproject.toml
+│
+├── desktop-agent/                     # Local desktop-control agent
+│
+├── browser-os/                        # BrowserOS source/integration
+│   └── BrowserOS/
+│
+├── scripts/
+│   ├── browser-use-agent.py           # Browser-Use bridge and policies
+│   ├── dev-all.mjs
+│   ├── apply-goal-migration.mjs
+│   ├── install-desktop-agent.ps1
+│   └── start-desktop-agent.ps1
+│
+├── docs/                              # Reports, diagrams, screenshots, PDFs
+├── public/                            # Static assets
+├── templates/                         # Workflow templates
+├── hooks/                             # Global React hooks
+│
+├── trigger.config.ts                  # Trigger.dev configuration
+├── drizzle.config.ts                  # Drizzle configuration
+├── next.config.ts                    # Next.js configuration
+├── proxy.ts                           # Request/proxy configuration
+├── instrumentation.ts                 # Server instrumentation
+├── instrumentation-client.ts          # Client instrumentation
+├── package.json
+├── tsconfig.json
+├── README.md
+└── .env.example
 ```
 
 ---
@@ -445,13 +510,15 @@ lib/
 
 | Technology | Purpose |
 |------------|---------|
-| Next.js 16 and React 19 | Application framework and interface |
-| React Flow | Visual workflow canvas |
-| Liveblocks | Collaborative graph state, cursors, and presence |
+| Next.js 16 and React 19 | Application framework and user interface |
+| React Flow | Visual workflow canvas and node-based editor |
+| Liveblocks | Real-time collaboration, graph synchronization, cursors, and presence |
 | Trigger.dev | Durable workflow execution, retries, cancellation, and live run metadata |
-| Stagehand | AI-powered browser actions, extraction, observation, and agents |
-| Browserbase | Managed browser sessions, model gateway, and session recordings |
-| Clerk | Authentication, organizations, and subscription plans |
-| Neon and Drizzle | Serverless Postgres and typed database access |
-| Resend | Email workflow execution |
-| Sentry | Frontend, server, edge, and background-task monitoring |
+| Browser-Use | Primary browser automation for navigation, actions, extraction, form filling, file uploads, and local browser execution |
+| Stagehand | AI-powered browser actions, extraction, observation, and agent capabilities used by workflow nodes |
+| Browserbase | Optional managed browser sessions and hosted session recordings |
+| Desktop Agent | Local desktop-control bridge for operating-system interaction |
+| Clerk | Authentication, organization management, and subscription plans |
+| Neon and Drizzle | Serverless PostgreSQL database and type-safe database access |
+| Resend | Sending workflow result emails and notifications |
+| Sentry | Frontend, server, edge, and background-task error monitoring |
